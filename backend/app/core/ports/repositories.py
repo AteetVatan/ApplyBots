@@ -11,7 +11,7 @@ from typing import Protocol
 from app.core.domain.application import Application, ApplicationStatus
 from app.core.domain.job import Job
 from app.core.domain.profile import Profile
-from app.core.domain.resume import Resume
+from app.core.domain.resume import Resume, ResumeDraft
 from app.core.domain.subscription import Subscription
 from app.core.domain.user import User
 
@@ -81,6 +81,41 @@ class ResumeRepository(Protocol):
 
     async def delete(self, resume_id: str) -> None:
         """Delete a resume."""
+        ...
+
+
+class ResumeDraftRepository(Protocol):
+    """Resume draft repository interface for the builder."""
+
+    async def get_by_id(self, draft_id: str) -> ResumeDraft | None:
+        """Get draft by ID."""
+        ...
+
+    async def get_by_user_id(
+        self,
+        user_id: str,
+        *,
+        include_published: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ResumeDraft]:
+        """Get all drafts for a user."""
+        ...
+
+    async def create(self, draft: ResumeDraft) -> ResumeDraft:
+        """Create a new draft."""
+        ...
+
+    async def update(self, draft: ResumeDraft) -> ResumeDraft:
+        """Update an existing draft (autosave)."""
+        ...
+
+    async def delete(self, draft_id: str) -> None:
+        """Delete a draft."""
+        ...
+
+    async def count_by_user_id(self, user_id: str) -> int:
+        """Count drafts for a user."""
         ...
 
 

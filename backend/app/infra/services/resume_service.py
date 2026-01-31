@@ -2,6 +2,7 @@
 
 Standards: python_clean.mdc
 - Coordinates storage and parsing
+- Generates embeddings for semantic search
 """
 
 import io
@@ -13,10 +14,15 @@ from enum import Enum
 import structlog
 
 from app.core.domain.resume import ParsedResume, Resume
+from app.core.ports.llm import LLMClient
 from app.core.ports.repositories import ResumeRepository
 from app.core.ports.storage import FileStorage
+from app.core.ports.vector_store import VectorStore
 
 logger = structlog.get_logger(__name__)
+
+# Collection name for resume embeddings
+RESUMES_COLLECTION = "resumes"
 
 
 class ExtractionMethod(Enum):
@@ -47,9 +53,13 @@ class ResumeService:
         *,
         storage: FileStorage,
         resume_repository: ResumeRepository,
+        llm_client: LLMClient | None = None,
+        vector_store: VectorStore | None = None,
     ) -> None:
         self._storage = storage
         self._resume_repo = resume_repository
+        self._llm_client = llm_client
+        self._vector_store = vector_store
 
     async def upload_and_parse(
         self,
@@ -76,6 +86,46 @@ class ResumeService:
         # Parse resume text
         parsed_data = await self._parse_resume_text(raw_text) if raw_text else None
 
+        # Generate embedding for semantic search
+        embedding = None
+        if raw_text and self._llm_client:
+            try:
+                # Truncate text for embedding (8k chars max for most models)
+                embed_text = raw_text[:8000]
+                embedding = await self._llm_client.embed(text=embed_text)
+
+                logger.info(
+                    "resume_embedding_generated",
+                    resume_id=resume_id,
+                    text_length=len(embed_text),
+                    embedding_dim=len(embedding),
+                )
+
+                # Store in vector database for semantic search
+                if self._vector_store:
+                    await self._vector_store.add_embedding(
+                        collection=RESUMES_COLLECTION,
+                        doc_id=resume_id,
+                        embedding=embedding,
+                        metadata={
+                            "user_id": user_id,
+                            "filename": filename,
+                        },
+                    )
+                    logger.info(
+                        "resume_stored_in_vector_db",
+                        resume_id=resume_id,
+                        collection=RESUMES_COLLECTION,
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    "resume_embedding_failed",
+                    resume_id=resume_id,
+                    error=str(e),
+                )
+                # Continue without embedding - not critical
+
         # Check if this is the first resume (make it primary)
         existing = await self._resume_repo.get_by_user_id(user_id)
         is_primary = len(existing) == 0
@@ -88,6 +138,7 @@ class ResumeService:
             s3_key=s3_key,
             raw_text=raw_text,
             parsed_data=parsed_data,
+            embedding=embedding,
             is_primary=is_primary,
             created_at=datetime.utcnow(),
         )
@@ -141,7 +192,7 @@ class ResumeService:
             return None
 
     async def _extract_pdf_text(self, content: bytes) -> str:
-        """Extract text from PDF using PyMuPDF with OCR fallback.
+        """Extract text from PDF using pdfplumber with OCR fallback.
 
         Strategy:
         1. Try native text extraction (fast, works for text-based PDFs)
@@ -165,19 +216,30 @@ class ResumeService:
     async def _extract_pdf_with_metadata(self, content: bytes) -> PDFExtractionResult:
         """Extract text from PDF with detailed metadata about the extraction."""
         try:
-            import fitz  # type: ignore[import-not-found]  # PyMuPDF
+            import pdfplumber  # type: ignore[import-not-found]
         except ImportError:
-            logger.error("pymupdf_not_installed")
+            logger.error("pdfplumber_not_installed")
             return PDFExtractionResult(
                 text="",
                 method=ExtractionMethod.FAILED,
                 page_count=0,
-                error_message="PyMuPDF not installed",
+                error_message="pdfplumber not installed",
             )
 
         try:
-            doc = fitz.open(stream=content, filetype="pdf")
+            pdf = pdfplumber.open(io.BytesIO(content))
         except Exception as e:
+            # pdfplumber raises exception for encrypted PDFs it cannot open
+            error_str = str(e).lower()
+            if "password" in error_str or "encrypt" in error_str:
+                logger.warning("pdf_encrypted", error=str(e))
+                return PDFExtractionResult(
+                    text="",
+                    method=ExtractionMethod.FAILED,
+                    page_count=0,
+                    is_encrypted=True,
+                    error_message="PDF is password-protected",
+                )
             logger.warning("pdf_open_failed", error=str(e))
             return PDFExtractionResult(
                 text="",
@@ -186,42 +248,26 @@ class ResumeService:
                 error_message=f"Failed to open PDF: {e}",
             )
 
-        page_count = len(doc)
-        is_encrypted = doc.is_encrypted
-
-        # Handle encrypted PDFs
-        if is_encrypted:
-            # Try to decrypt with empty password (some PDFs have open password = "")
-            if not doc.authenticate(""):
-                logger.warning("pdf_encrypted", page_count=page_count)
-                doc.close()
-                return PDFExtractionResult(
-                    text="",
-                    method=ExtractionMethod.FAILED,
-                    page_count=page_count,
-                    is_encrypted=True,
-                    error_message="PDF is password-protected",
-                )
+        page_count = len(pdf.pages)
 
         # First pass: native text extraction
         text_parts: list[str] = []
         has_images = False
 
-        for page in doc:
-            page_text = page.get_text()
+        for page in pdf.pages:
+            page_text = page.extract_text() or ""
             text_parts.append(page_text)
 
             # Check if page has images (potential scanned content)
             if not page_text.strip():
-                image_list = page.get_images()
-                if image_list:
+                if page.images:
                     has_images = True
 
+        pdf.close()
         native_text = "\n".join(text_parts).strip()
 
         # If we got sufficient text, return it
         if len(native_text) >= 50:  # Minimum threshold for valid content
-            doc.close()
             return PDFExtractionResult(
                 text=native_text,
                 method=ExtractionMethod.NATIVE,
@@ -234,9 +280,8 @@ class ResumeService:
         # If native extraction failed and there are images, try OCR
         if has_images or not native_text:
             if ocr_available:
-                ocr_text = await self._attempt_ocr_extraction(doc)
+                ocr_text = await self._attempt_ocr_extraction(content)
                 if ocr_text and len(ocr_text) > len(native_text):
-                    doc.close()
                     return PDFExtractionResult(
                         text=ocr_text,
                         method=ExtractionMethod.OCR,
@@ -249,8 +294,6 @@ class ResumeService:
                     has_images=has_images,
                     native_text_length=len(native_text),
                 )
-
-        doc.close()
 
         # Return whatever we have (even if empty)
         if native_text:
@@ -280,11 +323,11 @@ class ResumeService:
             error_message=error_msg,
         )
 
-    async def _attempt_ocr_extraction(self, doc: "fitz.Document") -> str:  # type: ignore[name-defined]
-        """Attempt OCR extraction on PDF pages.
+    async def _attempt_ocr_extraction(self, content: bytes) -> str:
+        """Attempt OCR extraction on PDF pages using pdf2image.
 
         Renders each page as a high-resolution image and runs Tesseract OCR.
-        Requires Tesseract to be installed on the system.
+        Requires Tesseract and poppler-utils to be installed on the system.
         Returns empty string if OCR is not available or fails.
         """
         # Check if Tesseract is available
@@ -293,13 +336,19 @@ class ResumeService:
             return ""
 
         try:
-            text_parts: list[str] = []
+            from pdf2image import convert_from_bytes  # type: ignore[import-not-found]
+        except ImportError:
+            logger.warning("pdf2image_not_installed")
+            return ""
 
-            for page_num, page in enumerate(doc):
+        try:
+            # Convert PDF pages to images at 300 DPI for OCR
+            images = convert_from_bytes(content, dpi=300)
+
+            text_parts: list[str] = []
+            for page_num, image in enumerate(images):
                 try:
-                    # Render page as high-resolution image (300 DPI) for OCR
-                    pix = page.get_pixmap(dpi=300)
-                    ocr_text = self._ocr_pixmap(pix)
+                    ocr_text = self._ocr_image(image)
 
                     if ocr_text:
                         logger.debug(
@@ -323,24 +372,20 @@ class ResumeService:
             logger.warning("ocr_extraction_failed", error=str(e))
             return ""
 
-    def _ocr_pixmap(self, pixmap: "fitz.Pixmap") -> str:  # type: ignore[name-defined]
-        """Run OCR on a PyMuPDF pixmap using pytesseract."""
+    def _ocr_image(self, image: "Image.Image") -> str:  # type: ignore[name-defined]
+        """Run OCR on a PIL Image using pytesseract."""
         try:
             import pytesseract  # type: ignore[import-not-found]
-            from PIL import Image
-
-            # Convert pixmap to PIL Image
-            img = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
 
             # Run OCR
-            text = pytesseract.image_to_string(img)
+            text: str = pytesseract.image_to_string(image)
             return text
 
         except ImportError:
-            logger.debug("pytesseract_or_pil_not_available")
+            logger.debug("pytesseract_not_available")
             return ""
         except Exception as e:
-            logger.warning("ocr_pixmap_failed", error=str(e))
+            logger.warning("ocr_image_failed", error=str(e))
             return ""
 
     def _is_tesseract_available(self) -> bool:

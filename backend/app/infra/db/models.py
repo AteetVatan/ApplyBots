@@ -21,8 +21,10 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.domain.application import ApplicationStatus
-from app.core.domain.job import JobSource
+from app.core.domain.alert import AlertType
+from app.core.domain.application import ApplicationStage, ApplicationStatus
+from app.core.domain.campaign import CampaignStatus, RecommendationMode
+from app.core.domain.job import JobSource, RemoteType
 from app.core.domain.subscription import Plan, SubscriptionStatus
 from app.core.domain.user import UserRole
 from app.infra.db.session import Base
@@ -50,10 +52,20 @@ class UserModel(Base):
     # Relationships
     profile: Mapped[Optional["ProfileModel"]] = relationship(back_populates="user", uselist=False)
     resumes: Mapped[List["ResumeModel"]] = relationship(back_populates="user")
+    resume_drafts: Mapped[List["ResumeDraftModel"]] = relationship(back_populates="user")
     applications: Mapped[List["ApplicationModel"]] = relationship(back_populates="user")
+    campaigns: Mapped[List["CampaignModel"]] = relationship(back_populates="user")
     subscription: Mapped[Optional["SubscriptionModel"]] = relationship(back_populates="user", uselist=False)
     refresh_sessions: Mapped[List["RefreshSessionModel"]] = relationship(back_populates="user")
     agent_sessions: Mapped[List["AgentSessionModel"]] = relationship(back_populates="user")
+    alerts: Mapped[List["AlertModel"]] = relationship(back_populates="user")
+    alert_preferences: Mapped[Optional["AlertPreferenceModel"]] = relationship(
+        back_populates="user", uselist=False
+    )
+    user_streak: Mapped[Optional["UserStreakModel"]] = relationship(
+        back_populates="user", uselist=False
+    )
+    achievements: Mapped[List["UserAchievementModel"]] = relationship(back_populates="user")
 
 
 class ProfileModel(Base):
@@ -113,6 +125,11 @@ class JobModel(Base):
     salary_max: Mapped[Optional[int]] = mapped_column(Integer)
     salary_currency: Mapped[str] = mapped_column(String(3), default="USD")
     remote: Mapped[bool] = mapped_column(Boolean, default=False)
+    remote_type: Mapped[RemoteType] = mapped_column(
+        Enum(RemoteType), default=RemoteType.ONSITE
+    )
+    remote_score: Mapped[int] = mapped_column(Integer, default=0)
+    timezone_requirements: Mapped[list] = mapped_column(JSON, default=list)
     requirements: Mapped[dict] = mapped_column(JSON, default=dict)
     embedding: Mapped[Optional[List[float]]] = mapped_column(ARRAY(Float))
     posted_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -134,6 +151,9 @@ class ApplicationModel(Base):
     status: Mapped[ApplicationStatus] = mapped_column(
         Enum(ApplicationStatus), default=ApplicationStatus.PENDING_REVIEW
     )
+    stage: Mapped[ApplicationStage] = mapped_column(
+        Enum(ApplicationStage), default=ApplicationStage.SAVED
+    )
     match_score: Mapped[int] = mapped_column(Integer, default=0)
     match_explanation: Mapped[Optional[dict]] = mapped_column(JSON)
     cover_letter: Mapped[Optional[str]] = mapped_column(Text)
@@ -142,12 +162,21 @@ class ApplicationModel(Base):
     qc_feedback: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    stage_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Timing intelligence columns
+    applied_day_of_week: Mapped[Optional[int]] = mapped_column(Integer)
+    applied_hour: Mapped[Optional[int]] = mapped_column(Integer)
+    days_after_posting: Mapped[Optional[int]] = mapped_column(Integer)
 
     # Relationships
     user: Mapped["UserModel"] = relationship(back_populates="applications")
     job: Mapped["JobModel"] = relationship(back_populates="applications")
     audit_logs: Mapped[List["AuditLogModel"]] = relationship(back_populates="application")
+    notes: Mapped[List["ApplicationNoteModel"]] = relationship(
+        back_populates="application", cascade="all, delete-orphan"
+    )
 
 
 class SubscriptionModel(Base):
@@ -227,3 +256,228 @@ class AuditLogModel(Base):
 
     # Relationships
     application: Mapped["ApplicationModel"] = relationship(back_populates="audit_logs")
+
+
+class ResumeDraftModel(Base):
+    """Resume draft database model for the builder with autosave."""
+
+    __tablename__ = "resume_drafts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_cuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    template_id: Mapped[str] = mapped_column(String(50), default="professional-modern")
+    ats_score: Mapped[Optional[int]] = mapped_column(Integer)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=datetime.utcnow)
+
+    # Relationships
+    user: Mapped["UserModel"] = relationship(back_populates="resume_drafts")
+
+
+class ApplicationNoteModel(Base):
+    """Application note database model."""
+
+    __tablename__ = "application_notes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_cuid)
+    application_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("applications.id", ondelete="CASCADE"), index=True
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    application: Mapped["ApplicationModel"] = relationship(back_populates="notes")
+
+
+class CampaignModel(Base):
+    """Campaign (copilot) database model.
+
+    Each campaign represents a targeted job search with its own
+    resume, criteria, and settings.
+    """
+
+    __tablename__ = "campaigns"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_cuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    resume_id: Mapped[str] = mapped_column(String(36), ForeignKey("resumes.id"))
+
+    # Search criteria
+    target_roles: Mapped[list] = mapped_column(JSON, default=list)
+    target_locations: Mapped[list] = mapped_column(JSON, default=list)
+    target_countries: Mapped[list] = mapped_column(JSON, default=list)
+    target_companies: Mapped[list] = mapped_column(JSON, default=list)
+    remote_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    salary_min: Mapped[Optional[int]] = mapped_column(Integer)
+    salary_max: Mapped[Optional[int]] = mapped_column(Integer)
+    negative_keywords: Mapped[list] = mapped_column(JSON, default=list)
+
+    # Behavior settings
+    auto_apply: Mapped[bool] = mapped_column(Boolean, default=False)
+    daily_limit: Mapped[int] = mapped_column(Integer, default=10)
+    min_match_score: Mapped[int] = mapped_column(Integer, default=70)
+    send_per_app_email: Mapped[bool] = mapped_column(Boolean, default=False)
+    cover_letter_template: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Status
+    status: Mapped[CampaignStatus] = mapped_column(
+        Enum(CampaignStatus), default=CampaignStatus.ACTIVE
+    )
+
+    # Statistics
+    jobs_found: Mapped[int] = mapped_column(Integer, default=0)
+    jobs_applied: Mapped[int] = mapped_column(Integer, default=0)
+    interviews: Mapped[int] = mapped_column(Integer, default=0)
+    offers: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=datetime.utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    activated_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Recommendation mode (keyword vs learned)
+    recommendation_mode: Mapped[RecommendationMode] = mapped_column(
+        Enum(RecommendationMode), default=RecommendationMode.KEYWORD
+    )
+
+    # Relationships
+    user: Mapped["UserModel"] = relationship(back_populates="campaigns")
+    resume: Mapped["ResumeModel"] = relationship()
+    campaign_jobs: Mapped[List["CampaignJobModel"]] = relationship(
+        back_populates="campaign", cascade="all, delete-orphan"
+    )
+
+
+class CampaignJobModel(Base):
+    """Campaign-job association with campaign-specific status.
+
+    Links campaigns to jobs and tracks per-campaign status
+    (pending, applied, rejected, saved).
+    """
+
+    __tablename__ = "campaign_jobs"
+
+    campaign_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("campaigns.id", ondelete="CASCADE"), primary_key=True
+    )
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    match_score: Mapped[int] = mapped_column(Integer, default=0)
+    adjusted_score: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    rejection_reason: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    applied_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationships
+    campaign: Mapped["CampaignModel"] = relationship(back_populates="campaign_jobs")
+    job: Mapped["JobModel"] = relationship()
+
+
+class AnswerEditModel(Base):
+    """Answer edit history for copilot learning.
+
+    Stores user edits to AI-generated screening question answers
+    to enable few-shot learning for future answer generation.
+    """
+
+    __tablename__ = "answer_edits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_cuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    question_normalized: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    question_original: Mapped[str] = mapped_column(Text, nullable=False)
+    original_answer: Mapped[str] = mapped_column(Text, nullable=False)
+    edited_answer: Mapped[str] = mapped_column(Text, nullable=False)
+    job_title: Mapped[Optional[str]] = mapped_column(String(500))
+    job_company: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user: Mapped["UserModel"] = relationship()
+
+
+# =============================================================================
+# Alert System Models
+# =============================================================================
+
+
+class AlertModel(Base):
+    """Alert notification database model."""
+
+    __tablename__ = "alerts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_cuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    alert_type: Mapped[AlertType] = mapped_column(Enum(AlertType), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    # Relationships
+    user: Mapped["UserModel"] = relationship(back_populates="alerts")
+
+
+class AlertPreferenceModel(Base):
+    """User preferences for alerts."""
+
+    __tablename__ = "alert_preferences"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_cuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), unique=True)
+    dream_job_threshold: Mapped[int] = mapped_column(Integer, default=90)
+    interview_reminder_hours: Mapped[int] = mapped_column(Integer, default=24)
+    daily_digest: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled_types: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=datetime.utcnow)
+
+    # Relationships
+    user: Mapped["UserModel"] = relationship(back_populates="alert_preferences")
+
+
+# =============================================================================
+# Gamification Models
+# =============================================================================
+
+
+class UserStreakModel(Base):
+    """User activity streak tracking."""
+
+    __tablename__ = "user_streaks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_cuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), unique=True)
+    current_streak: Mapped[int] = mapped_column(Integer, default=0)
+    longest_streak: Mapped[int] = mapped_column(Integer, default=0)
+    last_activity_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    total_points: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=datetime.utcnow)
+
+    # Relationships
+    user: Mapped["UserModel"] = relationship(back_populates="user_streak")
+
+
+class UserAchievementModel(Base):
+    """User achievements/badges earned."""
+
+    __tablename__ = "user_achievements"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_cuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    achievement_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    earned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user: Mapped["UserModel"] = relationship(back_populates="achievements")

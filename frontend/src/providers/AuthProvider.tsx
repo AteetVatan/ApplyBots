@@ -55,8 +55,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchUser = useCallback(async (token: string) => {
     try {
-      console.log("[Auth] Fetching user with token:", token ? `${token.substring(0, 20)}...` : "NO TOKEN");
-      
       const response = await fetch("/api/v1/profile", {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -64,24 +62,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         cache: "no-store",
       });
 
-      console.log("[Auth] Profile response status:", response.status);
-
       if (response.ok) {
         const profile = await response.json();
-        console.log("[Auth] Profile loaded:", profile.user_id);
         setUser({
           id: profile.user_id,
           email: profile.email || "",
           fullName: profile.full_name,
         });
       } else {
-        const errorText = await response.text();
-        console.log("[Auth] Profile error:", errorText);
         clearTokens();
         setUser(null);
       }
-    } catch (err) {
-      console.error("[Auth] Fetch error:", err);
+    } catch {
       clearTokens();
       setUser(null);
     }

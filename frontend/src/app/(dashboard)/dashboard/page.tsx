@@ -5,40 +5,19 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Briefcase, FileText, CheckCircle, Clock, Loader2 } from "lucide-react";
 
-// #region agent log
-const debugLog = (location: string, message: string, data: Record<string, unknown>) => {
-  fetch('http://127.0.0.1:7242/ingest/478687fd-7ff3-4069-9a5d-c1e34f5138df',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location,message,data,timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-};
-// #endregion
-
 export default function DashboardPage() {
   const { user } = useAuth();
 
-  // #region agent log
-  debugLog('dashboard/page.tsx:entry', 'Dashboard component rendering', { userId: user?.id });
-  // #endregion
-
   // Fetch real data from API (fetch 5 items to display top 3 on dashboard)
-  const { data: jobsData, isLoading: jobsLoading, error: jobsError } = useQuery({
+  const { data: jobsData, isLoading: jobsLoading } = useQuery({
     queryKey: ["jobs", { page: 1, limit: 5 }],
     queryFn: () => api.getJobs({ page: 1, limit: 5 }),
   });
 
-  const { data: applicationsData, isLoading: appsLoading, error: appsError } = useQuery({
+  const { data: applicationsData, isLoading: appsLoading } = useQuery({
     queryKey: ["applications", { page: 1 }],
     queryFn: () => api.getApplications({ page: 1 }),
   });
-
-  // #region agent log
-  debugLog('dashboard/page.tsx:data', 'Dashboard data fetched', { 
-    jobsTotal: jobsData?.total, 
-    appsTotal: applicationsData?.total,
-    jobsError: jobsError?.message,
-    appsError: appsError?.message,
-    jobsLoading,
-    appsLoading
-  });
-  // #endregion
 
   // Calculate real stats from applications
   const pendingCount = applicationsData?.items.filter(a => a.status === "pending_review").length ?? 0;

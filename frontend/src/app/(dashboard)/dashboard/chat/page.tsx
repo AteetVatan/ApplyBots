@@ -3,12 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2, Bot, User } from "lucide-react";
 
-// #region agent log
-const debugLog = (location: string, message: string, data: Record<string, unknown>) => {
-  fetch('http://127.0.0.1:7242/ingest/478687fd-7ff3-4069-9a5d-c1e34f5138df',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location,message,data,timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
-};
-// #endregion
-
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -54,9 +48,6 @@ export default function ChatPage() {
 
     try {
       const token = localStorage.getItem("ApplyBots_access_token");
-      // #region agent log
-      debugLog('chat/page.tsx:send', 'Sending chat message', { messageLength: userMessage.content.length });
-      // #endregion
       const response = await fetch("/api/v1/agents/chat", {
         method: "POST",
         headers: {
@@ -66,22 +57,11 @@ export default function ChatPage() {
         body: JSON.stringify({ message: userMessage.content }),
       });
 
-      // #region agent log
-      debugLog('chat/page.tsx:response', 'Chat response received', { status: response.status, ok: response.ok });
-      // #endregion
-
       if (!response.ok) {
-        const errorBody = await response.text();
-        // #region agent log
-        debugLog('chat/page.tsx:error', 'Chat failed', { status: response.status, body: errorBody });
-        // #endregion
         throw new Error(`Chat failed: ${response.status}`);
       }
 
       const data = await response.json();
-      // #region agent log
-      debugLog('chat/page.tsx:success', 'Chat success', { hasMessage: !!data.message });
-      // #endregion
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -91,10 +71,7 @@ export default function ChatPage() {
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-    } catch (error) {
-      // #region agent log
-      debugLog('chat/page.tsx:catch', 'Chat exception', { error: error instanceof Error ? error.message : 'Unknown' });
-      // #endregion
+    } catch {
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
@@ -127,8 +104,8 @@ export default function ChatPage() {
             >
               <div
                 className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${message.role === "user"
-                    ? "bg-primary-500/20 text-primary-400"
-                    : "bg-accent-500/20 text-accent-400"
+                  ? "bg-primary-500/20 text-primary-400"
+                  : "bg-accent-500/20 text-accent-400"
                   }`}
               >
                 {message.role === "user" ? (
@@ -139,8 +116,8 @@ export default function ChatPage() {
               </div>
               <div
                 className={`max-w-[70%] p-4 rounded-2xl ${message.role === "user"
-                    ? "bg-primary-600 ml-auto"
-                    : "bg-neutral-800"
+                  ? "bg-primary-600 ml-auto"
+                  : "bg-neutral-800"
                   }`}
               >
                 <p className="whitespace-pre-wrap">{message.content}</p>

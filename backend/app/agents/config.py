@@ -114,3 +114,28 @@ LLM_CONFIG_CODER = create_llm_config(
     temperature=0.2,
     timeout=120,
 )
+
+# =============================================================================
+# Career Tools LLM Configurations (Cost-Optimized)
+# =============================================================================
+
+# Interview Roleplay: Fast responses for real-time conversation
+LLM_CONFIG_INTERVIEW = create_llm_config(
+    model=Models.LLAMA4_SCOUT,  # ~$0.10/1M tokens - fastest for dialogue
+    temperature=0.6,  # Balanced for natural conversation
+    timeout=60,
+)
+
+# Offer Negotiation: Strong reasoning for financial analysis
+LLM_CONFIG_NEGOTIATION = create_llm_config(
+    model=Models.LLAMA3_70B,  # ~$0.60/1M tokens - good reasoning
+    temperature=0.4,  # Lower temp for analytical responses
+    timeout=90,
+)
+
+# Career Advisor: Analytical capability for skill matching
+LLM_CONFIG_CAREER = create_llm_config(
+    model=Models.LLAMA4_MAVERICK,  # ~$0.27/1M tokens - balanced
+    temperature=0.5,  # Moderate creativity for recommendations
+    timeout=90,
+)

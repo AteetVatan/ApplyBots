@@ -6,8 +6,12 @@ Standards: python_clean.mdc
 """
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+# Stage type for Kanban UI
+StageType = Literal["saved", "applied", "interviewing", "offer", "rejected"]
 
 
 class CreateApplicationRequest(BaseModel):
@@ -31,6 +35,26 @@ class EditApplicationRequest(BaseModel):
     answers: dict[str, str] | None = None
 
 
+class UpdateStageRequest(BaseModel):
+    """Request to update application stage (drag-drop)."""
+
+    stage: StageType
+
+
+class AddNoteRequest(BaseModel):
+    """Request to add a note to an application."""
+
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class NoteResponse(BaseModel):
+    """Application note response."""
+
+    id: str
+    content: str
+    created_at: datetime
+
+
 class AuditStepResponse(BaseModel):
     """Audit trail step response."""
 
@@ -50,9 +74,12 @@ class ApplicationSummaryResponse(BaseModel):
     job_title: str
     company: str
     status: str
+    stage: StageType
     match_score: int
+    notes: list[NoteResponse] = []
     created_at: datetime
     submitted_at: datetime | None
+    stage_updated_at: datetime | None = None
 
 
 class ApplicationDetailResponse(BaseModel):
@@ -63,15 +90,18 @@ class ApplicationDetailResponse(BaseModel):
     job_id: str
     resume_id: str
     status: str
+    stage: StageType
     match_score: int
     match_explanation: dict | None
     cover_letter: str | None
     generated_answers: dict[str, str]
+    notes: list[NoteResponse] = []
     qc_approved: bool
     qc_feedback: str | None
     audit_trail: list[AuditStepResponse]
     created_at: datetime
     submitted_at: datetime | None
+    stage_updated_at: datetime | None = None
     error_message: str | None
 
     # Nested job info
@@ -88,3 +118,17 @@ class ApplicationListResponse(BaseModel):
     page: int = Field(ge=1)
     limit: int = Field(ge=1, le=100)
     has_more: bool
+
+
+class StageItemsResponse(BaseModel):
+    """Applications in a single stage."""
+
+    items: list[ApplicationSummaryResponse]
+    count: int
+
+
+class GroupedApplicationsResponse(BaseModel):
+    """Applications grouped by stage for Kanban view."""
+
+    stages: dict[StageType, StageItemsResponse]
+    total: int

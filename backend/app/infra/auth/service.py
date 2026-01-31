@@ -105,6 +105,55 @@ class AuthService:
 
         return self._create_token_pair(user.id)
 
+    async def oauth_login(
+        self,
+        *,
+        email: str,
+        provider: str,
+        provider_id: str,
+        full_name: str | None = None,
+    ) -> TokenPair:
+        """Login or signup via OAuth provider.
+
+        Creates a new user if one doesn't exist for this email/provider.
+
+        Args:
+            email: User email from OAuth provider
+            provider: OAuth provider name (google, github)
+            provider_id: User ID from OAuth provider
+            full_name: User's full name from OAuth provider
+
+        Returns:
+            Token pair for authenticated user
+        """
+        # Check if user exists
+        user = await self._user_repo.get_by_email(email)
+
+        if not user:
+            # Create new user (OAuth users don't have a password)
+            import secrets
+            user_id = str(uuid.uuid4())
+            user = User(
+                id=user_id,
+                email=email,
+                password_hash=hash_password(secrets.token_urlsafe(32)),  # Random password
+                oauth_provider=provider,
+                oauth_provider_id=provider_id,
+            )
+            await self._user_repo.create(user)
+
+            # Create profile
+            if self._profile_repo:
+                profile = Profile(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    full_name=full_name,
+                    preferences=Preferences(),
+                )
+                await self._profile_repo.create(profile)
+
+        return self._create_token_pair(user.id)
+
     async def refresh(self, *, refresh_token: str) -> TokenPair:
         """Refresh access token using refresh token."""
         try:

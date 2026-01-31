@@ -46,9 +46,9 @@ celery_app.conf.update(
 
 # Scheduled tasks
 celery_app.conf.beat_schedule = {
-    "ingest-jobs-hourly": {
+    "ingest-jobs-4-hourly": {
         "task": "app.workers.job_ingestion.ingest_jobs_scheduled",
-        "schedule": 3600.0,  # Every hour
+        "schedule": 14400.0,  # Every 4 hours (14400 seconds)
     },
     "reset-daily-usage": {
         "task": "app.workers.job_ingestion.reset_daily_usage",

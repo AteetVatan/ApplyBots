@@ -179,6 +179,24 @@ JWT_SECRET_KEY=your-secure-random-string
 TOGETHER_API_KEY=your-api-key
 ```
 
+**Optional Environment Variables (for full features):**
+
+```env
+# OAuth (for social login)
+GOOGLE_OAUTH_CLIENT_ID=your-google-client-id
+GOOGLE_OAUTH_CLIENT_SECRET=your-google-client-secret
+GITHUB_OAUTH_CLIENT_ID=your-github-client-id
+GITHUB_OAUTH_CLIENT_SECRET=your-github-client-secret
+
+# Email notifications
+SENDGRID_API_KEY=your-sendgrid-api-key
+SENDGRID_SENDER_EMAIL=noreply@applybots.io
+
+# Rate limiting
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW_SECONDS=60
+```
+
 #### 4. Database Setup
 
 ```bash
@@ -400,15 +418,17 @@ docker exec ApplyBots-postgres pg_isready -U postgres
 
 ### Service Ports Summary
 
-| Service | Port | Console/UI |
-|---------|------|------------|
-| Backend API | 8080 | http://localhost:8080/docs |
-| Frontend | 3000 | http://localhost:3000 |
-| PostgreSQL | 5432 | - |
-| Redis | 6379 | - |
-| MinIO API | 9000 | - |
-| MinIO Console | 9001 | http://localhost:9001 |
-| ChromaDB | 8000 | - |
+| Service | Port | Console/UI | Purpose |
+|---------|------|------------|---------|
+| Backend API | 8080 | http://localhost:8080/docs | FastAPI server |
+| Frontend | 3000 | http://localhost:3000 | Next.js app |
+| PostgreSQL | 5432 | - | Primary database |
+| Redis | 6379 | - | Cache, queue broker |
+| MinIO API | 9000 | - | Object storage API |
+| MinIO Console | 9001 | http://localhost:9001 | Storage management UI |
+| ChromaDB | 8000 | - | Vector database |
+| Prometheus | 9090 | http://localhost:9090 | Metrics (optional) |
+| Grafana | 3001 | http://localhost:3001 | Monitoring (optional) |
 
 ---
 
@@ -451,6 +471,33 @@ Open http://localhost:3000 in your browser.
 
 ---
 
+## OAuth Setup (Optional)
+
+To enable Google and GitHub login:
+
+### Google OAuth
+
+1. Go to [Google Cloud Console](https://console.developers.google.com/)
+2. Create a new project or select an existing one
+3. Navigate to **APIs & Services > Credentials**
+4. Click **Create Credentials > OAuth client ID**
+5. Select **Web application**
+6. Add authorized redirect URI: `http://localhost:8080/api/v1/auth/google-callback`
+7. Copy the Client ID and Client Secret to your `.env` file
+
+### GitHub OAuth
+
+1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
+2. Click **New OAuth App**
+3. Fill in the details:
+   - **Application name**: ApplyBots (Local)
+   - **Homepage URL**: `http://localhost:3000`
+   - **Authorization callback URL**: `http://localhost:8080/api/v1/auth/github-callback`
+4. Copy the Client ID and generate a Client Secret
+5. Add both to your `.env` file
+
+---
+
 ## Environment Configuration
 
 ### Complete `.env` Template
@@ -462,6 +509,7 @@ Open http://localhost:3000 in your browser.
 APP_NAME=ApplyBots
 APP_ENV=development
 DEBUG=true
+APP_BASE_URL=http://localhost:8080
 
 # =============================================================================
 # Database
@@ -474,7 +522,7 @@ DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ApplyBots
 REDIS_URL=redis://localhost:6379/0
 
 # =============================================================================
-# Authentication
+# Authentication (JWT)
 # =============================================================================
 # Generate JWT secret (64 hex characters = 32 bytes):
 #   Linux/macOS: openssl rand -hex 32
@@ -484,6 +532,17 @@ JWT_SECRET_KEY=<generate-secure-64-hex-character-key>
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# =============================================================================
+# OAuth (Optional - for Google/GitHub login)
+# =============================================================================
+# Google OAuth: https://console.developers.google.com/
+GOOGLE_OAUTH_CLIENT_ID=<your-google-client-id>
+GOOGLE_OAUTH_CLIENT_SECRET=<your-google-client-secret>
+
+# GitHub OAuth: https://github.com/settings/developers
+GITHUB_OAUTH_CLIENT_ID=<your-github-client-id>
+GITHUB_OAUTH_CLIENT_SECRET=<your-github-client-secret>
 
 # =============================================================================
 # Together AI
@@ -510,10 +569,23 @@ S3_BUCKET=applybots
 S3_REGION=us-east-1
 
 # =============================================================================
-# ChromaDB
+# ChromaDB (Vector Database)
 # =============================================================================
 CHROMA_HOST=localhost
 CHROMA_PORT=8000
+
+# =============================================================================
+# SendGrid (Email Notifications)
+# =============================================================================
+# Get API key from https://sendgrid.com/
+SENDGRID_API_KEY=<your-sendgrid-api-key>
+SENDGRID_SENDER_EMAIL=noreply@applybots.io
+
+# =============================================================================
+# Rate Limiting
+# =============================================================================
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW_SECONDS=60
 ```
 
 ---
@@ -1085,10 +1157,14 @@ make typecheck
 
 After setup is complete:
 
-1. **Create an account** at http://localhost:3000/signup
-2. **Upload a resume** in the Profile section (requires MinIO to be running)
-3. **Browse jobs** to see match scores
-4. **Try the AI chat** to interact with agents
+1. **Create an account** at http://localhost:3000/signup (or use Google/GitHub OAuth)
+2. **Upload a resume** in the Resumes section (requires MinIO to be running)
+   - You can manage multiple resumes and set a primary one
+3. **Complete your profile** in the Profile section
+   - Add preferences like target roles, locations, and negative keywords
+4. **Browse jobs** to see match scores based on your resume
+5. **Try the AI chat** to interact with agents for job searching and applications
+6. **Create applications** - AI generates cover letters and answers screening questions
 
 ### Quick Service Status Check
 

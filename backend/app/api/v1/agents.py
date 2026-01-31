@@ -205,7 +205,8 @@ async def websocket_chat(
             await websocket.close(code=4001, reason="User not found")
             return
 
-    except Exception:
+    except Exception as e:
+        logger.warning("websocket_auth_failed", error=str(e))
         await websocket.close(code=4001, reason="Invalid token")
         return
 

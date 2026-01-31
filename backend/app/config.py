@@ -79,6 +79,38 @@ class Settings(BaseSettings):
     daily_apply_limit_premium: int = 20
     daily_apply_limit_elite: int = 50
 
+    # OAuth - Google
+    google_client_id: SecretStr = SecretStr("")
+    google_client_secret: SecretStr = SecretStr("")
+    google_redirect_uri: str = "http://localhost:3000/api/auth/callback/google"
+
+    # OAuth - GitHub
+    github_client_id: SecretStr = SecretStr("")
+    github_client_secret: SecretStr = SecretStr("")
+    github_redirect_uri: str = "http://localhost:3000/api/auth/callback/github"
+
+    # Email Notifications (SendGrid)
+    sendgrid_api_key: SecretStr = SecretStr("")
+    sendgrid_from_email: str = "noreply@applybots.com"
+
+    # Job Aggregator APIs
+    adzuna_app_id: str = ""
+    adzuna_api_key: SecretStr = SecretStr("")
+    jooble_api_key: SecretStr = SecretStr("")
+    themuse_api_key: SecretStr = SecretStr("")
+
+    # Company Intelligence APIs
+    newsapi_key: SecretStr = SecretStr("")
+
+    # Feature Flags
+    feature_company_intel: bool = True
+    feature_gamification: bool = True
+    feature_wellness: bool = True
+    feature_advanced_analytics: bool = True
+
+    # Alert Settings
+    alert_dream_job_default_threshold: int = 90
+
 
 @lru_cache
 def get_settings() -> Settings:

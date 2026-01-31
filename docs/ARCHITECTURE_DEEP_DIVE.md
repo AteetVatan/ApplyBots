@@ -46,17 +46,17 @@ The platform **NEVER fabricates information**. All AI-generated content is verif
 │                           USER INTERFACE                                 │
 │                    (Browser - Next.js Frontend)                         │
 │   ┌─────────┐ ┌───────────┐ ┌────────┐ ┌──────────┐ ┌─────────────┐   │
-│   │  Auth   │ │ Dashboard │ │  Jobs  │ │ Review   │ │  AI Chat    │   │
-│   │ Pages   │ │   Page    │ │  List  │ │ Apps     │ │  Interface  │   │
+│   │  Auth   │ │ Dashboard │ │  Jobs  │ │ Resumes  │ │  AI Chat    │   │
+│   │ (OAuth) │ │   Page    │ │  List  │ │ Manager  │ │  Interface  │   │
 │   └─────────┘ └───────────┘ └────────┘ └──────────┘ └─────────────┘   │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │ HTTP/REST API
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         API GATEWAY                                      │
-│                      (FastAPI Backend)                                  │
+│                  (FastAPI Backend + Rate Limiting)                      │
 │   ┌────────┐ ┌─────────┐ ┌──────┐ ┌─────────────┐ ┌─────────┐         │
-│   │ /auth  │ │/profile │ │/jobs │ │/applications│ │/agents  │ /billing│
+│   │ /auth  │ │/resumes │ │/jobs │ │/applications│ │/agents  │ /billing│
 │   └────────┘ └─────────┘ └──────┘ └─────────────┘ └─────────┘         │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
@@ -65,16 +65,23 @@ The platform **NEVER fabricates information**. All AI-generated content is verif
          ▼                       ▼                       ▼
 ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
 │   AI AGENTS     │   │  BACKGROUND     │   │  DATA LAYER     │
-│   (AutoGen)     │   │  WORKERS        │   │                 │
-│                 │   │  (Celery)       │   │  PostgreSQL     │
+│ (AutoGen Group  │   │  WORKERS        │   │                 │
+│     Chat)       │   │  (Celery)       │   │  PostgreSQL     │
 │  ┌───────────┐  │   │                 │   │  Redis          │
 │  │Orchestrate│  │   │  Job Ingestion  │   │  MinIO (S3)     │
 │  │ Resume    │  │   │  App Submitter  │   │  ChromaDB       │
-│  │ Match     │  │   │                 │   │                 │
-│  │ Apply     │  │   └─────────────────┘   └─────────────────┘
-│  │ QC        │  │
-│  └───────────┘  │
-└─────────────────┘
+│  │ Match     │  │   │  Status Monitor │   │                 │
+│  │ Apply     │  │   │  Email Notifs   │   │                 │
+│  │ QC/Critic │  │   └─────────────────┘   └─────────────────┘
+│  └───────────┘  │           │
+└─────────────────┘           ▼
+         │            ┌─────────────────┐
+         │            │  EXTERNAL APIs  │
+         └───────────>│  SendGrid       │
+                      │  Google OAuth   │
+                      │  GitHub OAuth   │
+                      │  Together AI    │
+                      └─────────────────┘
 ```
 
 ---
@@ -98,6 +105,9 @@ The platform **NEVER fabricates information**. All AI-generated content is verif
 | **ChromaDB** | Vector database | 0.4.22 | Semantic search with embeddings |
 | **Pydantic** | Data validation | 2.6.3 | Type validation & settings |
 | **Together AI** | LLM provider | - | AI model API (DeepSeek, Llama 4, Qwen) |
+| **SendGrid** | Email service | - | Transactional email notifications |
+| **BeautifulSoup** | Web scraping | 4.12 | HTML parsing for job scrapers |
+| **prometheus_client** | Metrics | - | Application monitoring |
 
 ### Frontend Technologies
 
@@ -215,6 +225,20 @@ class Application:
     cover_letter: str | None
     generated_answers: dict[str, str]  # Question -> Answer
     qc_approved: bool          # Quality control approval
+
+# Campaign - Job application campaign for organized job searching
+@dataclass
+class Campaign:
+    id: str
+    user_id: str
+    name: str
+    target_roles: list[str]
+    target_locations: list[str]
+    status: CampaignStatus     # DRAFT, ACTIVE, PAUSED, COMPLETED, ARCHIVED
+    start_date: datetime
+    end_date: datetime | None
+    jobs_applied: int
+    interviews_secured: int
 ```
 
 #### Ports (Interfaces) (`core/ports/`)
@@ -271,12 +295,12 @@ class MatchService:
 class TruthLockVerifier:
     """Verify AI-generated content against source documents."""
     
-    def verify(
+    async def verify_content(
         self,
         *,
-        content: str,        # AI-generated text
-        resume: ParsedResume,
-        job: Job,
+        generated_content: str,
+        source_documents: list[str],
+        user_id: str,
     ) -> VerificationResult:
         """
         Checks for:
@@ -286,6 +310,125 @@ class TruthLockVerifier:
         - Skill claims (skills must be listed)
         
         Returns violations if content fabricates information.
+        """
+```
+
+**CoverLetterService** - Generates personalized cover letters:
+
+```python
+class CoverLetterService:
+    """Service for generating and verifying cover letters."""
+    
+    async def generate_cover_letter(
+        self,
+        *,
+        resume: ParsedResume,
+        job: Job,
+        user_id: str,
+    ) -> CoverLetterResult:
+        """
+        1. Generate cover letter using LLM
+        2. Verify with Truth-Lock
+        3. Return content with verification status
+        """
+```
+
+**QuestionAnswererService** - Answers screening questions:
+
+```python
+class QuestionAnswererService:
+    """Service for answering job application screening questions."""
+    
+    async def answer_question(
+        self,
+        *,
+        question: str,
+        resume: ParsedResume,
+        job: Job,
+        user_id: str,
+    ) -> QuestionAnswerResult:
+        """
+        1. Generate answer based on resume and job context
+        2. Verify with Truth-Lock
+        3. Return answer with verification status
+        """
+```
+
+**SkillGapService** - Analyzes skill gaps and recommends courses:
+
+```python
+class SkillGapService:
+    """Service for analyzing skill gaps and recommending learning resources."""
+    
+    async def analyze_skill_gap(
+        self,
+        *,
+        resume: ParsedResume,
+        job: Job,
+        user_id: str,
+    ) -> SkillGapAnalysis:
+        """
+        1. Compare resume skills vs job requirements
+        2. Identify missing skills
+        3. Suggest relevant courses/resources
+        """
+```
+
+**RecruiterOutreachService** - Generates personalized outreach messages:
+
+```python
+class RecruiterOutreachService:
+    """Service for generating personalized recruiter outreach messages."""
+    
+    async def generate_outreach_message(
+        self,
+        *,
+        user_profile: Profile,
+        resume: ParsedResume,
+        job: Job,
+        recruiter_name: str | None = None,
+    ) -> OutreachMessage:
+        """
+        Generate professional outreach message for recruiters.
+        """
+```
+
+**AnalyticsService** - Interview preparation analytics:
+
+```python
+class AnalyticsService:
+    """Service for generating interview preparation analytics."""
+    
+    async def get_interview_prep_analytics(
+        self,
+        *,
+        resume: ParsedResume,
+        job: Job,
+        user_id: str,
+    ) -> InterviewPrepAnalytics:
+        """
+        1. Analyze resume against job description
+        2. Generate potential interview questions
+        3. Identify weak areas to prepare for
+        """
+```
+
+**ABTestingService** - A/B testing for resumes:
+
+```python
+class ABTestingService:
+    """Service for A/B testing different resume versions."""
+    
+    async def run_resume_ab_test(
+        self,
+        *,
+        user_id: str,
+        resume_a_id: str,
+        resume_b_id: str,
+        duration_days: int = 7,
+    ) -> ResumeABTestResult:
+        """
+        Compare two resume versions by tracking application outcomes.
         """
 ```
 
@@ -401,6 +544,41 @@ class AuthService:
     
     async def refresh(self, *, refresh_token: str) -> TokenPair:
         """Get new tokens using refresh token."""
+    
+    async def oauth_login_or_signup(self, *, user_info: OAuthUserInfo) -> TokenPair:
+        """Login or signup user via OAuth (Google, GitHub)."""
+```
+
+**OAuth Clients** (`oauth.py`):
+
+```python
+class GoogleOAuthClient:
+    """Google OAuth client for authentication."""
+    
+    def get_authorization_url(self) -> str:
+        """Generate Google OAuth authorization URL."""
+    
+    async def exchange_code_for_token(self, code: str) -> str:
+        """Exchange authorization code for access token."""
+    
+    async def get_user_info(self, access_token: str) -> OAuthUserInfo:
+        """Fetch user information from Google."""
+
+class GitHubOAuthClient:
+    """GitHub OAuth client for authentication."""
+    # Similar methods as GoogleOAuthClient
+```
+
+#### Email Notifications (`infra/notifications/`)
+
+**SendGrid Email Service** (`email.py`):
+
+```python
+class SendGridEmailService:
+    """SendGrid implementation of EmailService."""
+    
+    async def send_email(self, *, message: EmailMessage) -> None:
+        """Send an email using SendGrid API."""
 ```
 
 #### Storage (`infra/storage/`)
@@ -457,10 +635,20 @@ class LeverAdapter(BaseATSAdapter):
 
 #### Resume Service (`infra/services/resume_service.py`)
 
-Handles resume upload, text extraction, and parsing:
+Handles resume upload, text extraction, parsing, and embedding generation:
 
 ```python
 class ResumeService:
+    def __init__(
+        self,
+        *,
+        storage: FileStorage,
+        resume_repository: ResumeRepository,
+        llm_client: LLMClient,      # For embedding generation
+        vector_store: VectorStore,   # For storing embeddings
+    ) -> None:
+        ...
+    
     async def upload_and_parse(
         self,
         *,
@@ -473,7 +661,9 @@ class ResumeService:
         1. Upload to S3 storage
         2. Extract text (PDF or DOCX)
         3. Parse into structured data
-        4. Save to database
+        4. Generate embedding for semantic search
+        5. Store embedding in vector database
+        6. Save to database
         """
     
     async def _extract_pdf_text(self, content: bytes) -> str:
@@ -492,6 +682,61 @@ class ResumeService:
         - Work experience
         - Education
         """
+    
+    async def _generate_embedding(self, text: str) -> list[float] | None:
+        """Generate embedding for text using LLM client."""
+```
+
+#### Job Scrapers (`infra/scrapers/`)
+
+Web scrapers for external job boards:
+
+```python
+class BaseScraper:
+    """Base class for web scrapers."""
+    
+    async def _get_page_content(self, url: str) -> str:
+        """Fetch page content with httpx."""
+    
+    def _parse_html(self, html_content: str) -> BeautifulSoup:
+        """Parse HTML content."""
+
+class StackOverflowScraper(BaseScraper, JobScraper):
+    """Scraper for Stack Overflow job listings."""
+    
+    async def scrape_jobs(
+        self, *, keywords: list[str], location: str | None = None, limit: int = 20
+    ) -> list[Job]:
+        """Scrape job listings from Stack Overflow."""
+
+class WellFoundScraper(BaseScraper, JobScraper):
+    """Scraper for Wellfound (formerly AngelList) job listings."""
+    
+    async def scrape_jobs(
+        self, *, keywords: list[str], location: str | None = None, limit: int = 20
+    ) -> list[Job]:
+        """Scrape job listings from Wellfound."""
+```
+
+#### Rate Limiting (`api/middleware/rate_limit.py`)
+
+Redis-based rate limiting:
+
+```python
+class RedisRateLimiter:
+    """Redis implementation of RateLimiter using sliding window."""
+    
+    async def allow_request(self, *, key: str, limit: int, window: int) -> bool:
+        """Check if a request is allowed."""
+    
+    async def get_remaining_requests(self, *, key: str, window: int) -> int:
+        """Get remaining requests for a key within a window."""
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """FastAPI middleware for rate limiting."""
+    
+    async def dispatch(self, request: Request, call_next) -> Response:
+        """Apply rate limiting to incoming requests."""
 ```
 
 ---
@@ -506,8 +751,9 @@ REST API endpoints built with FastAPI:
 api_router = APIRouter()
 
 # All available endpoints:
-api_router.include_router(auth.router, prefix="/auth")           # Authentication
+api_router.include_router(auth.router, prefix="/auth")           # Authentication + OAuth
 api_router.include_router(profile.router, prefix="/profile")     # User profile
+api_router.include_router(resumes.router, prefix="/resumes")     # Resume management
 api_router.include_router(jobs.router, prefix="/jobs")           # Job listings
 api_router.include_router(applications.router, prefix="/applications")  # Applications
 api_router.include_router(agents.router, prefix="/agents")       # AI chat
@@ -522,9 +768,17 @@ api_router.include_router(billing.router, prefix="/billing")     # Subscriptions
 | `/auth/login` | POST | Login, get tokens |
 | `/auth/refresh` | POST | Refresh access token |
 | `/auth/logout` | POST | Invalidate session |
+| `/auth/google-login` | GET | Initiate Google OAuth |
+| `/auth/google-callback` | GET | Handle Google OAuth callback |
+| `/auth/github-login` | GET | Initiate GitHub OAuth |
+| `/auth/github-callback` | GET | Handle GitHub OAuth callback |
 | `/profile` | GET | Get user profile |
 | `/profile` | PUT | Update profile |
-| `/profile/resume` | POST | Upload resume |
+| `/resumes/upload` | POST | Upload new resume |
+| `/resumes` | GET | List user's resumes |
+| `/resumes/{id}` | GET | Get resume details |
+| `/resumes/{id}` | DELETE | Delete a resume |
+| `/resumes/{id}/set-primary` | POST | Set resume as primary |
 | `/jobs` | GET | List matching jobs |
 | `/jobs/{id}` | GET | Get job details |
 | `/jobs/refresh` | POST | Trigger job ingestion |
@@ -555,7 +809,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 ### Agents Module
 
-AI-powered multi-agent system using AutoGen:
+AI-powered multi-agent system using AutoGen with GroupChat:
 
 #### Agent Roles (`agents/prompts.py`)
 
@@ -595,31 +849,94 @@ class Models:
     BGE_LARGE = "BAAI/bge-large-en-v1.5"
 ```
 
+#### Agent Tools (`agents/tools.py`)
+
+Functions that AutoGen agents can call:
+
+```python
+# Tools for database interactions
+async def get_jobs(user_id: str, limit: int = 10, offset: int = 0, query: str | None = None) -> str:
+    """Get a list of jobs matching user preferences."""
+
+async def get_job_by_id(job_id: str) -> str:
+    """Get details of a specific job by its ID."""
+
+async def get_primary_resume(user_id: str) -> str:
+    """Get the user's primary resume."""
+
+async def optimize_resume(resume_id: str, job_id: str) -> str:
+    """Optimize a resume for a specific job."""
+
+async def create_application(user_id: str, job_id: str, resume_id: str) -> str:
+    """Create a new job application."""
+```
+
 #### Workflow Orchestration (`agents/workflows.py`)
+
+Uses AutoGen's GroupChat for multi-agent collaboration:
 
 ```python
 class JobApplicationWorkflow:
-    """Orchestrates multi-agent job application process."""
+    """Orchestrates multi-agent job application process using AutoGen GroupChat."""
     
-    async def process_message(self, message: str) -> AgentResponse:
+    def __init__(self, *, user_id: str, db_session: AsyncSession, settings: Settings, ...):
+        self._agents = self._setup_autogen_agents()
+        self._groupchat = GroupChat(
+            agents=list(self._agents.values()),
+            messages=[],
+            max_round=20,
+            speaker_selection_method="auto",
+            allow_repeat_speaker=False,
+        )
+        self._manager = GroupChatManager(
+            groupchat=self._groupchat,
+            llm_config=LLM_CONFIG_ORCHESTRATOR,
+        )
+    
+    def _setup_autogen_agents(self) -> dict[str, Agent]:
+        """Set up AutoGen agents with their configurations and tools."""
+        # UserProxyAgent for tool execution
+        user_proxy = UserProxyAgent(
+            name="UserProxy",
+            human_input_mode="NEVER",
+            max_consecutive_auto_reply=10,
+        )
+        
+        # Register tools with user_proxy
+        user_proxy.register_function(
+            function_map={
+                "get_jobs": get_jobs,
+                "get_job_by_id": get_job_by_id,
+                "get_primary_resume": get_primary_resume,
+                "optimize_resume": optimize_resume,
+                "create_application": create_application,
+            }
+        )
+        
+        # Define specialized agents
+        orchestrator = AssistantAgent(name="Orchestrator", ...)
+        resume_agent = AssistantAgent(name="ResumeAgent", ...)
+        match_agent = AssistantAgent(name="MatchAgent", ...)
+        # ... more agents
+        
+        return {
+            "user_proxy": user_proxy,
+            "orchestrator": orchestrator,
+            "resume_agent": resume_agent,
+            # ...
+        }
+    
+    async def process_message(self, message: str, session_id: str | None = None) -> AgentResponse:
         """
-        Process user message:
-        1. Analyze intent (job search, resume, apply, general)
-        2. Route to appropriate handler
-        3. Coordinate agent responses
+        Process user message through AutoGen GroupChat:
+        1. Add message to group chat
+        2. Initiate chat with GroupChatManager
+        3. Agents collaborate to respond
+        4. Return final response with involved agents
         """
     
     async def stream_process(self, message: str) -> AsyncIterator[StreamResponse]:
         """Stream agent responses for real-time UI updates."""
-    
-    async def optimize_resume(self, *, resume_id: str, job_id: str) -> OptimizationResult:
-        """
-        Optimize resume for specific job:
-        1. Calculate match score
-        2. Identify skill gaps
-        3. Generate tailored summary
-        4. Suggest improvements
-        """
 ```
 
 ---
@@ -638,6 +955,7 @@ celery_app = Celery(
     include=[
         "app.workers.job_ingestion",
         "app.workers.application_submitter",
+        "app.workers.status_monitor",
     ],
 )
 
@@ -651,12 +969,16 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.job_ingestion.reset_daily_usage",
         "schedule": 86400.0,  # Every 24 hours
     },
+    "monitor-applications-daily": {
+        "task": "app.workers.status_monitor.monitor_applications_task",
+        "schedule": 86400.0,  # Every 24 hours
+    },
 }
 ```
 
 #### Task Types
 
-**Job Ingestion** - Fetches new jobs from sources:
+**Job Ingestion** - Fetches new jobs from sources with embedding generation:
 
 ```python
 @celery_app.task
@@ -666,12 +988,13 @@ def ingest_jobs_scheduled():
     1. Query Remotive API for new listings
     2. Deduplicate against existing jobs
     3. Extract requirements with AI
-    4. Generate embeddings for search
-    5. Store in database
+    4. Generate embeddings for semantic search
+    5. Store embeddings in ChromaDB
+    6. Store job data in database
     """
 ```
 
-**Application Submitter** - Automated form filling:
+**Application Submitter** - Automated form filling with ATS adapters:
 
 ```python
 @celery_app.task
@@ -680,11 +1003,28 @@ def submit_application(application_id: str):
     Submit approved application:
     1. Load application data
     2. Detect ATS type (Greenhouse, Lever)
-    3. Launch browser with Playwright
-    4. Fill form fields
-    5. Capture screenshots at each step
-    6. Handle errors (CAPTCHA → manual)
-    7. Update status
+    3. Select appropriate ATS adapter
+    4. Launch browser with Playwright
+    5. Fill form fields using adapter
+    6. Capture screenshots at each step
+    7. Handle errors (CAPTCHA → manual)
+    8. Store audit trail
+    9. Update status
+    """
+```
+
+**Status Monitor** - Monitors application statuses and sends notifications:
+
+```python
+@celery_app.task
+def monitor_applications_task():
+    """
+    Monitor application statuses:
+    1. Fetch applications due for status check
+    2. Check external ATS for status updates
+    3. Update application status in database
+    4. Send email notification via SendGrid
+    5. Log status changes
     """
 ```
 
@@ -698,8 +1038,8 @@ def submit_application(application_id: str):
 frontend/src/
 ├── app/                          # Next.js App Router
 │   ├── (auth)/                   # Auth route group (no layout)
-│   │   ├── login/page.tsx        # Login page
-│   │   └── signup/page.tsx       # Signup page
+│   │   ├── login/page.tsx        # Login page (with OAuth buttons)
+│   │   └── signup/page.tsx       # Signup page (with OAuth buttons)
 │   │
 │   ├── (dashboard)/              # Dashboard route group (with layout)
 │   │   ├── layout.tsx            # Sidebar layout
@@ -707,6 +1047,7 @@ frontend/src/
 │   │       ├── page.tsx          # Main dashboard
 │   │       ├── jobs/page.tsx     # Job listings
 │   │       ├── applications/page.tsx
+│   │       ├── resumes/page.tsx  # Resume management
 │   │       ├── chat/page.tsx     # AI assistant
 │   │       ├── profile/page.tsx
 │   │       └── billing/page.tsx
@@ -716,12 +1057,19 @@ frontend/src/
 │   ├── layout.tsx                # Root layout
 │   └── page.tsx                  # Landing page
 │
+├── components/ui/                # Reusable UI components
+│   ├── button.tsx
+│   ├── card.tsx
+│   ├── dialog.tsx
+│   ├── input.tsx
+│   └── ...
+│
 ├── hooks/                        # Custom React hooks
 │   ├── useJobs.ts               # Job data fetching
 │   └── useApplications.ts       # Application data fetching
 │
 ├── lib/                         # Utilities
-│   ├── api.ts                   # Typed API client
+│   ├── api.ts                   # Typed API client with Zod schemas
 │   └── utils.ts                 # Helper functions
 │
 └── providers/                   # React Context providers
@@ -753,8 +1101,23 @@ export const JobSchema = z.object({
   match_score: z.number().nullable(),
 });
 
+export const ResumeSchema = z.object({
+  id: z.string(),
+  filename: z.string(),
+  is_primary: z.boolean(),
+  uploaded_at: z.string(),
+  parsed_data: z.object({
+    full_name: z.string().nullable(),
+    email: z.string().nullable(),
+    phone: z.string().nullable(),
+    skills: z.array(z.string()),
+    total_years_experience: z.number().nullable(),
+  }).nullable(),
+});
+
 // Type-safe API client
 class APIClient {
+  // Jobs
   async getJobs(params): Promise<JobListResponse> {
     return this.request(`/jobs?${query}`, {}, JobListResponseSchema);
   }
@@ -764,6 +1127,28 @@ class APIClient {
       method: "POST",
       body: JSON.stringify({ job_id: jobId }),
     });
+  }
+  
+  // Resumes
+  async getResumes(): Promise<ResumeListResponse> {
+    return this.request("/resumes", {}, ResumeListResponseSchema);
+  }
+  
+  async uploadResume(file: File): Promise<Resume> {
+    const formData = new FormData();
+    formData.append("file", file);
+    return this.request("/resumes/upload", {
+      method: "POST",
+      body: formData,
+    });
+  }
+  
+  async deleteResume(id: string): Promise<void> {
+    await this.request(`/resumes/${id}`, { method: "DELETE" });
+  }
+  
+  async setPrimaryResume(id: string): Promise<Resume> {
+    return this.request(`/resumes/${id}/set-primary`, { method: "POST" });
   }
 }
 ```
@@ -804,22 +1189,55 @@ Primary relational database storing:
 
 | Table | Purpose |
 |-------|---------|
-| `users` | User accounts |
-| `profiles` | User preferences, contact info |
-| `resumes` | Uploaded resumes with parsed data |
+| `users` | User accounts (includes OAuth fields) |
+| `profiles` | User preferences, contact info, negative keywords |
+| `resumes` | Uploaded resumes with parsed data & embeddings |
 | `jobs` | Job listings with embeddings |
 | `applications` | Application records & status |
+| `campaigns` | Job search campaigns for organized tracking |
 | `subscriptions` | Plan & billing info |
 | `refresh_sessions` | JWT refresh tokens |
 | `agent_sessions` | AI chat history |
 | `audit_logs` | Automation action logs |
 
+**Key Fields Added:**
+
+```python
+# User model - OAuth support
+class UserModel(Base):
+    ...
+    oauth_provider: str | None       # "google" or "github"
+    oauth_provider_id: str | None    # Provider's user ID
+
+# Profile model - Negative keywords
+class ProfileModel(Base):
+    ...
+    preferences: dict  # Includes negative_keywords: list[str]
+
+# Resume model - Embeddings
+class ResumeModel(Base):
+    ...
+    embedding: list[float] | None    # Vector for semantic search
+```
+
 ### Redis (Cache & Queue)
 
 - **Session cache** - Fast user lookups
-- **Rate limiting** - Track API requests
+- **Rate limiting** - Sliding window counter for API requests
 - **Celery broker** - Task message queue
 - **Celery backend** - Task results storage
+
+**Rate Limiting Keys:**
+
+```
+# Format: rate_limit:{user_id}:{endpoint}
+rate_limit:user123:/api/v1/jobs
+
+# Sliding window implementation
+# Stores timestamps as sorted set scores
+ZADD key timestamp member
+ZCOUNT key (now - window) now
+```
 
 ### MinIO (Object Storage)
 
@@ -833,14 +1251,39 @@ S3-compatible storage for:
 
 Stores embeddings for semantic search:
 
+**Collections:**
+
+| Collection | Purpose |
+|------------|---------|
+| `resumes` | Resume embeddings for matching |
+| `jobs` | Job description embeddings |
+
 ```python
-# Example: Find similar jobs to resume
-resume_embedding = embed(resume_text)  # 1536-dimensional vector
-similar_jobs = chromadb.query(
-    embedding=resume_embedding,
-    n_results=10,
+# Adding embeddings during ingestion
+await vector_store.add_embedding(
+    collection="jobs",
+    doc_id=job.id,
+    embedding=embedding,
+    metadata={
+        "title": job.title,
+        "company": job.company,
+        "location": job.location,
+        "remote": job.remote,
+    },
+)
+
+# Searching for similar jobs
+similar_jobs = await vector_store.search_by_embedding(
+    collection="jobs",
+    embedding=resume_embedding,  # 1024-dimensional vector (BGE-Large)
+    top_k=10,
 )
 ```
+
+**Embedding Model:**
+- Model: `BAAI/bge-large-en-v1.5`
+- Dimensions: 1024
+- Provider: Together AI
 
 ---
 
@@ -923,8 +1366,29 @@ password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
 access_token: 30 minutes
 refresh_token: 7 days
 
+# OAuth providers: Google and GitHub
+# Uses authorization code flow with PKCE
+# Securely stores client secrets in environment variables
+
 # Sensitive data: Pydantic SecretStr
 jwt_secret_key: SecretStr  # Never logged or exposed
+google_oauth_client_secret: SecretStr
+github_oauth_client_secret: SecretStr
+```
+
+### Rate Limiting
+
+```python
+# Redis-based sliding window rate limiting
+# Configurable limits per plan:
+#   Free:    100 requests/minute
+#   Premium: 500 requests/minute
+#   Elite:   2000 requests/minute
+
+# Headers returned:
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 95
+X-RateLimit-Reset: 1609459200
 ```
 
 ### Data Protection
@@ -942,17 +1406,23 @@ jwt_secret_key: SecretStr  # Never logged or exposed
 | **ATS** | Applicant Tracking System - Software companies use to manage applications (Greenhouse, Lever) |
 | **AutoGen** | Microsoft's framework for building multi-agent AI systems |
 | **Celery** | Distributed task queue for Python, processes background jobs |
+| **ChromaDB** | Vector database for storing and searching embeddings |
 | **CORS** | Cross-Origin Resource Sharing - Browser security for API requests |
 | **DIP** | Dependency Inversion Principle - Core depends on abstractions, not implementations |
 | **Embedding** | Vector representation of text for semantic similarity search |
 | **FastAPI** | Modern Python web framework with automatic OpenAPI docs |
+| **GroupChat** | AutoGen feature for coordinating multiple AI agents in conversation |
 | **JWT** | JSON Web Token - Secure token for authentication |
 | **LLM** | Large Language Model - AI model like DeepSeek, Llama, Qwen |
 | **MinIO** | S3-compatible object storage for files |
+| **OAuth** | Open Authorization - Protocol for secure delegated access (Google, GitHub login) |
 | **ORM** | Object-Relational Mapping - Map database tables to Python classes |
 | **Port** | Interface defining what the core layer needs (Protocol in Python) |
+| **Rate Limiting** | Mechanism to control API request frequency per user/IP |
 | **Redis** | In-memory data store for caching and message queuing |
+| **SendGrid** | Email delivery service for transactional emails |
 | **Truth-Lock** | System ensuring AI doesn't fabricate information |
+| **Vector Search** | Finding similar documents using embedding similarity |
 | **Zod** | TypeScript library for runtime type validation |
 
 ---
@@ -988,4 +1458,4 @@ make lint       # Check code style
 
 ---
 
-*Document generated for ApplyBots v0.1.0*
+*Document updated for ApplyBots v0.2.0 - Includes AutoGen GroupChat, OAuth, Resume Management, and more*

@@ -9,10 +9,10 @@ import {
   Briefcase,
   FileText,
   MessageSquare,
-  Settings,
   LogOut,
   User,
   CreditCard,
+  Sparkles,
 } from "lucide-react";
 
 const navItems = [
@@ -20,6 +20,7 @@ const navItems = [
   { href: "/dashboard/jobs", icon: Briefcase, label: "Jobs" },
   { href: "/dashboard/applications", icon: FileText, label: "Applications" },
   { href: "/dashboard/chat", icon: MessageSquare, label: "AI Chat" },
+  { href: "/dashboard/tools", icon: Sparkles, label: "AI Tools" },
   { href: "/dashboard/profile", icon: User, label: "Profile" },
   { href: "/dashboard/billing", icon: CreditCard, label: "Billing" },
 ];

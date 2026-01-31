@@ -16,7 +16,12 @@ class JobSource(Enum):
     REMOTIVE = "remotive"
     GREENHOUSE = "greenhouse"
     LEVER = "lever"
+    WELLFOUND = "wellfound"
+    ADZUNA = "adzuna"
+    JOOBLE = "jooble"
+    THEMUSE = "themuse"
     MANUAL = "manual"
+    OTHER = "other"
 
 
 @dataclass
@@ -29,6 +34,39 @@ class JobRequirements:
     experience_years_max: int | None = None
     education_level: str | None = None
     certifications: list[str] = field(default_factory=list)
+
+
+class RemoteType(Enum):
+    """Remote work type classification."""
+
+    ONSITE = "onsite"
+    HYBRID = "hybrid"
+    REMOTE = "remote"
+    REMOTE_US = "remote_us"
+    REMOTE_GLOBAL = "remote_global"
+
+
+@dataclass
+class RemoteIntelligence:
+    """Detailed remote work analysis."""
+
+    remote_type: RemoteType
+    timezone_requirements: list[str] | None = None
+    office_locations: list[str] = field(default_factory=list)
+    remote_score: int = 0  # 0-100 based on job text analysis
+    travel_required: bool | None = None
+
+
+@dataclass
+class ApplicationTiming:
+    """Optimal application timing intelligence."""
+
+    optimal_window_start: datetime
+    optimal_window_end: datetime
+    urgency_score: int  # 0-100
+    days_since_posted: int
+    estimated_applicants: int
+    recommendation: str  # "Apply now", "Good time", "May be late"
 
 
 @dataclass
@@ -47,6 +85,9 @@ class Job:
     salary_max: int | None = None
     salary_currency: str = "USD"
     remote: bool = False
+    remote_type: RemoteType = RemoteType.ONSITE
+    remote_score: int = 0
+    timezone_requirements: list[str] | None = None
     requirements: JobRequirements = field(default_factory=JobRequirements)
     embedding: list[float] | None = None
     posted_at: datetime | None = None

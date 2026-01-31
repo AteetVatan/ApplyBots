@@ -11,7 +11,7 @@ from enum import Enum
 
 
 class ApplicationStatus(Enum):
-    """Application status enumeration."""
+    """Application status enumeration (submission workflow)."""
 
     PENDING_REVIEW = "pending_review"
     APPROVED = "approved"
@@ -21,6 +21,16 @@ class ApplicationStatus(Enum):
     MANUAL_NEEDED = "manual_needed"
     REJECTED = "rejected"
     INTERVIEW = "interview"
+
+
+class ApplicationStage(Enum):
+    """Application pipeline stage for Kanban UI."""
+
+    SAVED = "saved"
+    APPLIED = "applied"
+    INTERVIEWING = "interviewing"
+    OFFER = "offer"
+    REJECTED = "rejected"  # Hidden/archived stage
 
 
 @dataclass(frozen=True)
@@ -52,6 +62,15 @@ class MatchExplanation:
 
 
 @dataclass
+class ApplicationNote:
+    """Note attached to an application."""
+
+    id: str
+    content: str
+    created_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
 class Application:
     """Job application domain entity."""
 
@@ -60,12 +79,15 @@ class Application:
     job_id: str
     resume_id: str
     status: ApplicationStatus = ApplicationStatus.PENDING_REVIEW
+    stage: ApplicationStage = ApplicationStage.SAVED
     match_score: int = 0
     match_explanation: MatchExplanation | None = None
     cover_letter: str | None = None
     generated_answers: dict[str, str] = field(default_factory=dict)
+    notes: list[ApplicationNote] = field(default_factory=list)
     qc_approved: bool = False
     qc_feedback: str | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     submitted_at: datetime | None = None
+    stage_updated_at: datetime | None = None
     error_message: str | None = None

@@ -51,10 +51,10 @@ def decode_access_token(
 
         return payload
 
-    except jwt.ExpiredSignatureError:
-        raise TokenExpiredError()
-    except jwt.InvalidTokenError:
-        raise TokenInvalidError()
+    except jwt.ExpiredSignatureError as e:
+        raise TokenExpiredError() from e
+    except jwt.InvalidTokenError as e:
+        raise TokenInvalidError() from e
 
 
 def decode_refresh_token(
@@ -72,7 +72,7 @@ def decode_refresh_token(
 
         return payload
 
-    except jwt.ExpiredSignatureError:
-        raise TokenExpiredError()
-    except jwt.InvalidTokenError:
-        raise TokenInvalidError()
+    except jwt.ExpiredSignatureError as e:
+        raise TokenExpiredError() from e
+    except jwt.InvalidTokenError as e:
+        raise TokenInvalidError() from e

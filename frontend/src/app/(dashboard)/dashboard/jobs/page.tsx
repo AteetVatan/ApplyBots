@@ -7,12 +7,6 @@ import { formatSalary, formatRelativeTime, getMatchScoreColor } from "@/lib/util
 import { MapPin, Briefcase, DollarSign, Clock, Plus, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 
-// #region agent log
-const debugLog = (location: string, message: string, data: Record<string, unknown>) => {
-  fetch('http://127.0.0.1:7242/ingest/478687fd-7ff3-4069-9a5d-c1e34f5138df',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location,message,data,timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-};
-// #endregion
-
 export default function JobsPage() {
   const [page, setPage] = useState(1);
   const { data, isLoading, refetch, isFetching } = useJobs({ page, limit: 20 });
@@ -23,34 +17,23 @@ export default function JobsPage() {
   const handleRefresh = async () => {
     setRefreshing(true);
     setRefreshError(null);
-    // #region agent log
-    debugLog('jobs/page.tsx:refresh', 'Starting job refresh', {});
-    // #endregion
     try {
       await api.refreshJobs();
-      // #region agent log
-      debugLog('jobs/page.tsx:refreshSuccess', 'Job refresh succeeded', {});
-      // #endregion
       setTimeout(() => {
         refetch();
         setRefreshing(false);
       }, 2000);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
-      // #region agent log
-      debugLog('jobs/page.tsx:refreshError', 'Job refresh failed', { error: errorMsg });
-      // #endregion
       setRefreshError(errorMsg);
       setRefreshing(false);
     }
   };
 
   const handleApply = async (jobId: string) => {
-    try {
-      await createApplication.mutateAsync({ jobId });
-    } catch (error) {
-      console.error("Failed to create application:", error);
-    }
+    await createApplication.mutateAsync({ jobId }).catch(() => {
+      // Error handled by TanStack Query's error state
+    });
   };
 
   return (

@@ -175,8 +175,8 @@ async def logout(
     try:
         await auth_service.logout(access_token=credentials.credentials)
         logger.info("user_logout")
-    except Exception:
-        pass  # Logout should not fail
+    except Exception as e:
+        logger.warning("logout_failed", error=str(e))  # Logout should not fail
 
 
 @router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
@@ -211,4 +211,166 @@ async def logout_all(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
+        )
+
+
+# ========================
+# OAuth Endpoints
+# ========================
+
+from pydantic import BaseModel
+
+
+class OAuthUrlResponse(BaseModel):
+    """OAuth authorization URL response."""
+
+    url: str
+
+
+class OAuthCallbackRequest(BaseModel):
+    """OAuth callback request."""
+
+    code: str
+    state: str | None = None
+
+
+@router.get("/oauth/google", response_model=OAuthUrlResponse)
+async def google_oauth_url(
+    settings: AppSettings,
+) -> OAuthUrlResponse:
+    """Get Google OAuth authorization URL."""
+    from app.infra.auth.oauth import OAuthService
+
+    oauth_service = OAuthService(settings)
+
+    # Generate state for CSRF protection
+    import secrets
+    state = secrets.token_urlsafe(32)
+
+    url = oauth_service.get_google_auth_url(state=state)
+    return OAuthUrlResponse(url=url)
+
+
+@router.post("/oauth/google/callback", response_model=AuthResponse)
+async def google_oauth_callback(
+    request: OAuthCallbackRequest,
+    db: DBSession,
+    settings: AppSettings,
+) -> AuthResponse:
+    """Handle Google OAuth callback."""
+    from app.infra.auth.oauth import OAuthError, OAuthService
+    from app.infra.auth.service import AuthService
+    from app.infra.db.repositories.profile import SQLProfileRepository
+    from app.infra.db.repositories.user import SQLUserRepository
+
+    oauth_service = OAuthService(settings)
+
+    try:
+        # Get user info from Google
+        user_info = await oauth_service.google_callback(code=request.code)
+
+        # Create or get user
+        user_repo = SQLUserRepository(session=db)
+        profile_repo = SQLProfileRepository(session=db)
+        auth_service = AuthService(
+            user_repository=user_repo,
+            profile_repository=profile_repo,
+            secret_key=settings.jwt_secret_key.get_secret_value(),
+            algorithm=settings.jwt_algorithm,
+            access_expire_minutes=settings.access_token_expire_minutes,
+            refresh_expire_days=settings.refresh_token_expire_days,
+        )
+
+        tokens = await auth_service.oauth_login(
+            email=user_info.email,
+            provider=user_info.provider,
+            provider_id=user_info.provider_id,
+            full_name=user_info.name,
+        )
+
+        logger.info("oauth_login", provider="google", email=user_info.email)
+
+        return AuthResponse(
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            token_type="bearer",
+            expires_in=settings.access_token_expire_minutes * 60,
+        )
+
+    except OAuthError as e:
+        logger.error("oauth_error", provider="google", error=e.message)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"OAuth error: {e.message}",
+        )
+
+
+@router.get("/oauth/github", response_model=OAuthUrlResponse)
+async def github_oauth_url(
+    settings: AppSettings,
+) -> OAuthUrlResponse:
+    """Get GitHub OAuth authorization URL."""
+    from app.infra.auth.oauth import OAuthService
+
+    oauth_service = OAuthService(settings)
+
+    # Generate state for CSRF protection
+    import secrets
+    state = secrets.token_urlsafe(32)
+
+    url = oauth_service.get_github_auth_url(state=state)
+    return OAuthUrlResponse(url=url)
+
+
+@router.post("/oauth/github/callback", response_model=AuthResponse)
+async def github_oauth_callback(
+    request: OAuthCallbackRequest,
+    db: DBSession,
+    settings: AppSettings,
+) -> AuthResponse:
+    """Handle GitHub OAuth callback."""
+    from app.infra.auth.oauth import OAuthError, OAuthService
+    from app.infra.auth.service import AuthService
+    from app.infra.db.repositories.profile import SQLProfileRepository
+    from app.infra.db.repositories.user import SQLUserRepository
+
+    oauth_service = OAuthService(settings)
+
+    try:
+        # Get user info from GitHub
+        user_info = await oauth_service.github_callback(code=request.code)
+
+        # Create or get user
+        user_repo = SQLUserRepository(session=db)
+        profile_repo = SQLProfileRepository(session=db)
+        auth_service = AuthService(
+            user_repository=user_repo,
+            profile_repository=profile_repo,
+            secret_key=settings.jwt_secret_key.get_secret_value(),
+            algorithm=settings.jwt_algorithm,
+            access_expire_minutes=settings.access_token_expire_minutes,
+            refresh_expire_days=settings.refresh_token_expire_days,
+        )
+
+        tokens = await auth_service.oauth_login(
+            email=user_info.email,
+            provider=user_info.provider,
+            provider_id=user_info.provider_id,
+            full_name=user_info.name,
+        )
+
+        logger.info("oauth_login", provider="github", email=user_info.email)
+
+        return AuthResponse(
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            token_type="bearer",
+            expires_in=settings.access_token_expire_minutes * 60,
+        )
+
+    except OAuthError as e:
+        logger.error("oauth_error", provider="github", error=e.message)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"OAuth error: {e.message}",
         )

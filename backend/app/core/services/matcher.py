@@ -5,6 +5,7 @@ Standards: python_clean.mdc
 - Functions <=15 LOC
 - kw-only args after *
 - No magic numbers (use MatchWeights)
+- Supports preference boost and rejection penalty adjustments
 """
 
 from app.core.domain.application import MatchExplanation, MatchWeights
@@ -17,7 +18,12 @@ class MatchService:
     """Calculate job-candidate match scores.
 
     Pure business logic - no IO dependencies.
+    Supports adjustment modifiers from learning services.
     """
+
+    # Score bounds
+    MIN_SCORE = 0
+    MAX_SCORE = 100
 
     def __init__(self, *, weights: MatchWeights | None = None) -> None:
         """Initialize with optional custom weights."""
@@ -29,8 +35,21 @@ class MatchService:
         resume: ParsedResume,
         job: Job,
         preferences: Preferences | None = None,
+        preference_boost: int = 0,
+        rejection_penalty: float = 0.0,
     ) -> tuple[int, MatchExplanation]:
-        """Calculate match score (0-100) with detailed explanation."""
+        """Calculate match score (0-100) with detailed explanation.
+
+        Args:
+            resume: Candidate's parsed resume
+            job: Job to score against
+            preferences: Optional user preferences
+            preference_boost: Points to add based on similar applied jobs (0-15)
+            rejection_penalty: Penalty factor for similar rejected jobs (0.0-0.5)
+
+        Returns:
+            Tuple of (score, explanation)
+        """
         skills_result = self._score_skills(resume=resume, job=job)
         experience_result = self._score_experience(resume=resume, job=job)
         location_result = self._score_location(
@@ -39,12 +58,20 @@ class MatchService:
         salary_result = self._score_salary(job=job, preferences=preferences)
         culture_score = self._score_culture(resume=resume, job=job)
 
-        total = int(
+        # Calculate base score
+        base_total = int(
             skills_result[0] * self._weights.SKILLS
             + experience_result[0] * self._weights.EXPERIENCE
             + location_result[0] * self._weights.LOCATION
             + salary_result[0] * self._weights.SALARY
             + culture_score * self._weights.CULTURE
+        )
+
+        # Apply learning adjustments
+        adjusted_total = self._apply_adjustments(
+            base_score=base_total,
+            preference_boost=preference_boost,
+            rejection_penalty=rejection_penalty,
         )
 
         explanation = MatchExplanation(
@@ -58,10 +85,37 @@ class MatchService:
             salary_score=salary_result[0],
             salary_in_range=salary_result[1],
             culture_score=culture_score,
-            overall_recommendation=self._get_recommendation(total),
+            overall_recommendation=self._get_recommendation(adjusted_total),
         )
 
-        return total, explanation
+        return adjusted_total, explanation
+
+    def _apply_adjustments(
+        self,
+        *,
+        base_score: int,
+        preference_boost: int,
+        rejection_penalty: float,
+    ) -> int:
+        """Apply learning adjustments to base score.
+
+        Args:
+            base_score: Calculated base match score
+            preference_boost: Points to add (0-15)
+            rejection_penalty: Percentage to subtract (0.0-0.5)
+
+        Returns:
+            Adjusted score clamped to MIN_SCORE-MAX_SCORE
+        """
+        # Apply preference boost first (from similar applied jobs)
+        adjusted = base_score + preference_boost
+
+        # Then apply rejection penalty (from similar rejected jobs)
+        if rejection_penalty > 0:
+            adjusted = int(adjusted * (1 - rejection_penalty))
+
+        # Clamp to valid range
+        return max(self.MIN_SCORE, min(self.MAX_SCORE, adjusted))
 
     def _score_skills(
         self,

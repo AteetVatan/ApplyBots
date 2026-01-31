@@ -4,12 +4,6 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Upload, FileText, Loader2, Check } from "lucide-react";
 
-// #region agent log
-const debugLog = (location: string, message: string, data: Record<string, unknown>) => {
-  fetch('http://127.0.0.1:7242/ingest/478687fd-7ff3-4069-9a5d-c1e34f5138df',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location,message,data,timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-};
-// #endregion
-
 interface ProfileData {
   id: string;
   user_id: string;
@@ -29,22 +23,18 @@ export default function ProfilePage() {
   const [resumeFile, setResumeFile] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Fetch existing profile data
-  const { data: profile, isLoading: profileLoading, error: profileError } = useQuery<ProfileData>({
+  const { data: profile } = useQuery<ProfileData>({
     queryKey: ["profile"],
     queryFn: async () => {
       const token = localStorage.getItem("ApplyBots_access_token");
-      // #region agent log
-      debugLog('profile/page.tsx:fetch', 'Fetching profile', { hasToken: !!token });
-      // #endregion
       const response = await fetch("/api/v1/profile", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!response.ok) {
-        // #region agent log
-        debugLog('profile/page.tsx:fetchError', 'Profile fetch failed', { status: response.status });
-        // #endregion
         throw new Error("Failed to fetch profile");
       }
       return response.json();
@@ -53,14 +43,6 @@ export default function ProfilePage() {
 
   // Populate form when profile loads
   useEffect(() => {
-    // #region agent log
-    debugLog('profile/page.tsx:effect', 'Profile data effect', { 
-      profileLoaded: !!profile, 
-      fullName: profile?.full_name,
-      headline: profile?.headline,
-      location: profile?.location 
-    });
-    // #endregion
     if (profile) {
       setFullName(profile.full_name || "");
       setHeadline(profile.headline || "");
@@ -73,6 +55,7 @@ export default function ProfilePage() {
     if (!file) return;
 
     setUploading(true);
+    setUploadError(null);
 
     try {
       const token = localStorage.getItem("ApplyBots_access_token");
@@ -89,9 +72,11 @@ export default function ProfilePage() {
 
       if (response.ok) {
         setResumeFile(file.name);
+      } else {
+        setUploadError("Upload failed. Please try again.");
       }
-    } catch (error) {
-      console.error("Upload failed:", error);
+    } catch {
+      setUploadError("Upload failed. Please try again.");
     } finally {
       setUploading(false);
     }
@@ -99,10 +84,11 @@ export default function ProfilePage() {
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveError(null);
 
     try {
       const token = localStorage.getItem("ApplyBots_access_token");
-      await fetch("/api/v1/profile", {
+      const response = await fetch("/api/v1/profile", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -115,10 +101,14 @@ export default function ProfilePage() {
         }),
       });
 
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (error) {
-      console.error("Save failed:", error);
+      if (response.ok) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } else {
+        setSaveError("Failed to save. Please try again.");
+      }
+    } catch {
+      setSaveError("Failed to save. Please try again.");
     } finally {
       setSaving(false);
     }

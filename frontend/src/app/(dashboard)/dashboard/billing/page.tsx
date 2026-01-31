@@ -4,12 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Check, Zap, CreditCard, Loader2, AlertCircle } from "lucide-react";
 
-// #region agent log
-const debugLog = (location: string, message: string, data: Record<string, unknown>) => {
-  fetch('http://127.0.0.1:7242/ingest/478687fd-7ff3-4069-9a5d-c1e34f5138df',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location,message,data,timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-};
-// #endregion
-
 const plans = [
   {
     id: "free",
@@ -54,23 +48,8 @@ const plans = [
 export default function BillingPage() {
   const { data: usage, isLoading, error } = useQuery({
     queryKey: ["usage"],
-    queryFn: async () => {
-      // #region agent log
-      debugLog('billing/page.tsx:fetch', 'Fetching usage data', {});
-      // #endregion
-      const result = await api.getUsage();
-      // #region agent log
-      debugLog('billing/page.tsx:fetchSuccess', 'Usage data fetched', { plan: result.plan, used: result.used_today });
-      // #endregion
-      return result;
-    },
+    queryFn: () => api.getUsage(),
   });
-
-  // #region agent log
-  if (error) {
-    debugLog('billing/page.tsx:error', 'Usage fetch error', { error: error instanceof Error ? error.message : 'Unknown' });
-  }
-  // #endregion
 
   const handleUpgrade = async (planId: string) => {
     // In production, this would redirect to Stripe checkout
