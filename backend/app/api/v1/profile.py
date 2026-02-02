@@ -282,7 +282,7 @@ async def list_resumes(
     return result
 
 
-@router.delete("/resumes/{resume_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/resumes/{resume_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_resume(
     resume_id: str,
     current_user: CurrentUser,

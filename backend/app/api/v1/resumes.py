@@ -18,7 +18,7 @@ from app.core.domain.resume import ParsedResume
 from app.infra.db.models import UserModel
 from app.infra.db.repositories.resume import SQLResumeRepository
 from app.infra.services.resume_service import ResumeService
-from app.infra.storage.s3 import S3FileStorage
+from app.infra.storage.s3 import S3Storage
 from app.config import get_settings
 
 router = APIRouter()
@@ -121,7 +121,7 @@ async def upload_resume(
 
     # Initialize services
     settings = get_settings()
-    storage = S3FileStorage(
+    storage = S3Storage(
         endpoint=settings.s3_endpoint,
         access_key=settings.s3_access_key.get_secret_value(),
         secret_key=settings.s3_secret_key.get_secret_value(),
@@ -175,7 +175,7 @@ async def get_resume(
     )
 
 
-@router.delete("/{resume_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{resume_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_resume(
     resume_id: str,
     current_user: Annotated[UserModel, Depends(get_current_user)],
@@ -190,7 +190,7 @@ async def delete_resume(
 
     # Delete from storage
     settings = get_settings()
-    storage = S3FileStorage(
+    storage = S3Storage(
         endpoint=settings.s3_endpoint,
         access_key=settings.s3_access_key.get_secret_value(),
         secret_key=settings.s3_secret_key.get_secret_value(),

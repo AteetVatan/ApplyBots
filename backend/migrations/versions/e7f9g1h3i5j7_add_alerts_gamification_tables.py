@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "e7f9g1h3i5j7"
@@ -19,8 +20,20 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # Create AlertType enum
-    alert_type_enum = sa.Enum(
+    # Create AlertType enum via raw SQL
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE alerttype AS ENUM (
+                'dream_job_match', 'application_status_change', 'interview_reminder',
+                'campaign_milestone', 'achievement_unlocked', 'wellness_tip'
+            );
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+
+    # Reference existing enum type
+    alert_type_enum = postgresql.ENUM(
         "dream_job_match",
         "application_status_change",
         "interview_reminder",
@@ -28,8 +41,8 @@ def upgrade() -> None:
         "achievement_unlocked",
         "wellness_tip",
         name="alerttype",
+        create_type=False,
     )
-    alert_type_enum.create(op.get_bind(), checkfirst=True)
 
     # Create alerts table
     op.create_table(
@@ -93,5 +106,5 @@ def downgrade() -> None:
     op.drop_table("alert_preferences")
     op.drop_table("alerts")
 
-    # Drop AlertType enum
-    sa.Enum(name="alerttype").drop(op.get_bind(), checkfirst=True)
+    # Drop AlertType enum via raw SQL
+    op.execute("DROP TYPE IF EXISTS alerttype")

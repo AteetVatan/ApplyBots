@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import get_current_user, get_db_session
+from app.api.deps import get_current_user, get_db
 from app.config import get_settings
 from app.core.services.company_intel import CompanyIntelligenceService
 from app.schemas.company_intel import (
@@ -34,7 +34,7 @@ def _get_company_intel_service() -> CompanyIntelligenceService:
 @router.get("/{company_name}/intelligence", response_model=CompanyIntelligenceResponse)
 async def get_company_intelligence(
     company_name: str,
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
     refresh: bool = Query(False, description="Force refresh (bypass cache)"),
 ):

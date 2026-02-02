@@ -9,7 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'c5d7e9f1g5h6'
@@ -20,12 +20,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Create campaigns and campaign_jobs tables."""
-    # Create CampaignStatus enum type
-    campaign_status_enum = sa.Enum(
+    # Create CampaignStatus enum type via raw SQL (most reliable)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE campaignstatus AS ENUM (
+                'draft', 'active', 'paused', 'completed', 'archived'
+            );
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+
+    # Reference existing enum type (create_type=False prevents re-creation)
+    campaign_status_enum = postgresql.ENUM(
         'draft', 'active', 'paused', 'completed', 'archived',
-        name='campaignstatus'
+        name='campaignstatus',
+        create_type=False
     )
-    campaign_status_enum.create(op.get_bind(), checkfirst=True)
 
     # Create campaigns table
     op.create_table(
@@ -35,14 +46,14 @@ def upgrade() -> None:
         sa.Column('name', sa.String(length=255), nullable=False),
         sa.Column('resume_id', sa.String(length=36), nullable=False),
         # Search criteria
-        sa.Column('target_roles', JSON, nullable=False, server_default='[]'),
-        sa.Column('target_locations', JSON, nullable=False, server_default='[]'),
-        sa.Column('target_countries', JSON, nullable=False, server_default='[]'),
-        sa.Column('target_companies', JSON, nullable=False, server_default='[]'),
+        sa.Column('target_roles', postgresql.JSON, nullable=False, server_default='[]'),
+        sa.Column('target_locations', postgresql.JSON, nullable=False, server_default='[]'),
+        sa.Column('target_countries', postgresql.JSON, nullable=False, server_default='[]'),
+        sa.Column('target_companies', postgresql.JSON, nullable=False, server_default='[]'),
         sa.Column('remote_only', sa.Boolean(), nullable=False, server_default='false'),
         sa.Column('salary_min', sa.Integer(), nullable=True),
         sa.Column('salary_max', sa.Integer(), nullable=True),
-        sa.Column('negative_keywords', JSON, nullable=False, server_default='[]'),
+        sa.Column('negative_keywords', postgresql.JSON, nullable=False, server_default='[]'),
         # Behavior settings
         sa.Column('auto_apply', sa.Boolean(), nullable=False, server_default='false'),
         sa.Column('daily_limit', sa.Integer(), nullable=False, server_default='10'),
@@ -122,6 +133,5 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_campaigns_user_id'), table_name='campaigns')
     op.drop_table('campaigns')
 
-    # Drop enum type
-    campaign_status_enum = sa.Enum(name='campaignstatus')
-    campaign_status_enum.drop(op.get_bind(), checkfirst=True)
+    # Drop enum type via raw SQL
+    op.execute("DROP TYPE IF EXISTS campaignstatus")

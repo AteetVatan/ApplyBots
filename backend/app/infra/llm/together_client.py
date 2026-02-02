@@ -323,3 +323,96 @@ class TogetherLLMClient:
                 embeddings.append(embedding)
 
         return embeddings
+
+    @retry(
+        retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+    )
+    async def complete_vision(
+        self,
+        *,
+        image_base64: str,
+        prompt: str,
+        model: str,
+        temperature: float = 0.1,
+        max_tokens: int = 4096,
+    ) -> str:
+        """Generate completion from image using vision model.
+
+        Used for OCR-like text extraction from PDF page images.
+
+        Args:
+            image_base64: Base64-encoded image data
+            prompt: Text prompt for the vision model
+            model: Vision model identifier (e.g., Llama-3.2-11B-Vision-Instruct-Turbo)
+            temperature: Sampling temperature (low for accurate extraction)
+            max_tokens: Maximum tokens to generate
+
+        Returns:
+            Extracted text from the image
+
+        Raises:
+            TogetherAPIError: If API request fails
+        """
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt,
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{image_base64}",
+                            },
+                        },
+                    ],
+                }
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        logger.debug(
+            "llm_vision_request",
+            model=model,
+            image_size_chars=len(image_base64),
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(
+                f"{self._base_url}/chat/completions",
+                headers=self._get_headers(),
+                json=payload,
+            )
+
+            if response.status_code != 200:
+                error_detail = response.text
+                logger.error(
+                    "llm_vision_error",
+                    status_code=response.status_code,
+                    error=error_detail,
+                )
+                raise TogetherAPIError(response.status_code, error_detail)
+
+            data = response.json()
+
+        content = data["choices"][0]["message"]["content"]
+        usage = data.get("usage", {})
+
+        logger.info(
+            "llm_vision_success",
+            model=model,
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            output_length=len(content),
+        )
+
+        return content

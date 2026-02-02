@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * i18n Module - Centralized String Management
  *
@@ -11,7 +13,7 @@
  *
  * ### Server Components
  * ```tsx
- * import { getT } from "@/i18n";
+ * import { getT, getLocale } from "@/i18n/server";
  *
  * export default async function Page() {
  *   const t = await getT();
@@ -43,13 +45,14 @@
 // Configuration
 // ---------------------------------------------------------------------------
 
+// Note: parseAcceptLanguage is server-only and has been moved to getLocale.ts.
+// It's not exported from the client module to break the shared dependency chain.
 export {
   DEFAULT_LOCALE,
   SUPPORTED_LOCALES,
   LOCALE_COOKIE_NAME,
   isValidLocale,
   validateLocale,
-  parseAcceptLanguage,
 } from "./config";
 
 // ---------------------------------------------------------------------------
@@ -87,16 +90,13 @@ export {
 } from "./core/interpolate";
 
 // ---------------------------------------------------------------------------
-// Next.js Integration
+// Next.js Integration (Client-side only)
 // ---------------------------------------------------------------------------
+// NOTE: Server-side functions (getLocale, getT) are NOT exported here.
+// Import them directly from "@/i18n/server" in server components.
 
-// Server-side
-export { getLocale, getLocaleSync } from "./next/getLocale";
-export { getT, getTranslation } from "./next/getT";
-
-// Client-side
-export { I18nProvider, useI18nContext, useLocale } from "./next/I18nProvider";
-export { useT } from "./next/useT";
+export { I18nProvider, useI18nContext, useLocale } from "./client/I18nProvider";
+export { useT } from "./client/useT";
 
 // ---------------------------------------------------------------------------
 // Dictionaries (for advanced usage)

@@ -66,7 +66,7 @@ export default function ChatPage() {
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: data.message,
+        content: data.message || "I processed your request but couldn't generate a response. Please try again.",
         timestamp: new Date(),
       };
 

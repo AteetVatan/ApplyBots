@@ -40,7 +40,7 @@ class LLMClient(Protocol):
         """Generate a completion."""
         ...
 
-    async def stream(
+    def stream(
         self,
         *,
         messages: list[LLMMessage],

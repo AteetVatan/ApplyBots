@@ -2,96 +2,136 @@
  * Resume templates registry.
  *
  * Exports all available templates with their configurations.
+ * Inspired by Reactive Resume (https://github.com/AmruthPillai/Reactive-Resume)
  */
 
 import type { TemplateConfig } from "./types";
-import { ProfessionalModern } from "./ProfessionalModern";
-import { ClassicTraditional } from "./ClassicTraditional";
-import { TechMinimalist } from "./TechMinimalist";
-import { TwoColumn } from "./TwoColumn";
-import { ATSOptimized } from "./ATSOptimized";
+import { Azurill } from "./Azurill";
+import { Bronzor } from "./Bronzor";
+import { Chikorita } from "./Chikorita";
+import { Ditto } from "./Ditto";
+import { Ditgar } from "./Ditgar";
+import { Gengar } from "./Gengar";
+import { Glalie } from "./Glalie";
+import { Kakuna } from "./Kakuna";
+import { Lapras } from "./Lapras";
+import { Leafish } from "./Leafish";
+import { Onyx } from "./Onyx";
+import { Pikachu } from "./Pikachu";
+import { Rhyhorn } from "./Rhyhorn";
 
 export * from "./types";
-export { ProfessionalModern } from "./ProfessionalModern";
-export { ClassicTraditional } from "./ClassicTraditional";
-export { TechMinimalist } from "./TechMinimalist";
-export { TwoColumn } from "./TwoColumn";
-export { ATSOptimized } from "./ATSOptimized";
+export { Azurill } from "./Azurill";
+export { Bronzor } from "./Bronzor";
+export { Chikorita } from "./Chikorita";
+export { Ditto } from "./Ditto";
+export { Ditgar } from "./Ditgar";
+export { Gengar } from "./Gengar";
+export { Glalie } from "./Glalie";
+export { Kakuna } from "./Kakuna";
+export { Lapras } from "./Lapras";
+export { Leafish } from "./Leafish";
+export { Onyx } from "./Onyx";
+export { Pikachu } from "./Pikachu";
+export { Rhyhorn } from "./Rhyhorn";
 
 /**
- * All available resume templates.
+ * All available resume templates (13 total).
+ * Names inspired by Pokemon, matching Reactive Resume's naming convention.
  */
 export const TEMPLATES: TemplateConfig[] = [
+  // Single-column templates (ATS Score: 95)
   {
-    id: "professional-modern",
-    name: "Professional Modern",
-    description: "Clean, modern design with blue accents and balanced whitespace",
+    id: "bronzor",
+    name: "Bronzor",
+    description: "Clean, minimalist single-column design with profile picture left of name",
     atsScore: 95,
-    component: ProfessionalModern,
+    component: Bronzor,
   },
   {
-    id: "classic-traditional",
-    name: "Classic Traditional",
-    description: "Timeless serif design suitable for conservative industries",
-    atsScore: 98,
-    component: ClassicTraditional,
+    id: "kakuna",
+    name: "Kakuna",
+    description: "Clean single-column design with subtle styling variations",
+    atsScore: 95,
+    component: Kakuna,
   },
   {
-    id: "tech-minimalist",
-    name: "Tech Minimalist",
-    description: "Monospace font with grid layout, perfect for developers",
-    atsScore: 92,
-    component: TechMinimalist,
+    id: "rhyhorn",
+    name: "Rhyhorn",
+    description: "Clean minimalist single-column design with professional layout",
+    atsScore: 95,
+    component: Rhyhorn,
   },
   {
-    id: "two-column",
-    name: "Two Column",
-    description: "Space-efficient two-column layout with sidebar",
+    id: "onyx",
+    name: "Onyx",
+    description: "Single-column design with thin border and blue accent line",
+    atsScore: 95,
+    component: Onyx,
+  },
+  {
+    id: "lapras",
+    name: "Lapras",
+    description: "Single-column layout with pink/magenta header accent and elegant serif typography",
+    atsScore: 95,
+    component: Lapras,
+  },
+  {
+    id: "leafish",
+    name: "Leafish",
+    description: "Single-column layout with green accent bars and modern typography",
+    atsScore: 95,
+    component: Leafish,
+  },
+  // Two-column templates (ATS Score: 88)
+  {
+    id: "azurill",
+    name: "Azurill",
+    description: "Two-column layout with purple/magenta gradient sidebar",
     atsScore: 88,
-    component: TwoColumn,
+    component: Azurill,
   },
   {
-    id: "ats-optimized",
-    name: "ATS Optimized",
-    description: "Ultra-simple format designed for maximum ATS compatibility",
-    atsScore: 100,
-    component: ATSOptimized,
-  },
-  // Additional template placeholders (use ProfessionalModern as fallback)
-  {
-    id: "creative-designer",
-    name: "Creative Designer",
-    description: "Bold typography and creative layout for design roles",
-    atsScore: 85,
-    component: ProfessionalModern, // TODO: Create dedicated template
+    id: "chikorita",
+    name: "Chikorita",
+    description: "Two-column layout with green sidebar for profile, skills, and certifications",
+    atsScore: 88,
+    component: Chikorita,
   },
   {
-    id: "executive-premium",
-    name: "Executive Premium",
-    description: "Sophisticated design for senior leadership positions",
-    atsScore: 94,
-    component: ClassicTraditional, // TODO: Create dedicated template
+    id: "ditto",
+    name: "Ditto",
+    description: "Two-column layout with teal/cyan RIGHT sidebar - unique reversed layout",
+    atsScore: 88,
+    component: Ditto,
   },
   {
-    id: "academic-research",
-    name: "Academic/Research",
-    description: "Detailed format for academic and research positions",
-    atsScore: 90,
-    component: ClassicTraditional, // TODO: Create dedicated template
+    id: "ditgar",
+    name: "Ditgar",
+    description: "Two-column layout with sky blue sidebar featuring skill progress bars",
+    atsScore: 88,
+    component: Ditgar,
   },
   {
-    id: "entry-level",
-    name: "Entry Level",
-    description: "Focus on education and skills for new graduates",
-    atsScore: 96,
-    component: ProfessionalModern, // TODO: Create dedicated template
+    id: "gengar",
+    name: "Gengar",
+    description: "Two-column layout with blue sidebar for profile, skills, and certifications",
+    atsScore: 88,
+    component: Gengar,
   },
   {
-    id: "compact-dense",
-    name: "Compact Dense",
-    description: "Maximum content in minimum space",
-    atsScore: 91,
-    component: TechMinimalist, // TODO: Create dedicated template
+    id: "glalie",
+    name: "Glalie",
+    description: "Two-column layout with dark emerald sidebar - compact professional design",
+    atsScore: 88,
+    component: Glalie,
+  },
+  {
+    id: "pikachu",
+    name: "Pikachu",
+    description: "Two-column layout with vibrant yellow/gold sidebar",
+    atsScore: 88,
+    component: Pikachu,
   },
 ];
 
@@ -106,6 +146,22 @@ export function getTemplate(id: string): TemplateConfig | undefined {
  * Get template component by ID, with fallback.
  */
 export function getTemplateComponent(id: string): TemplateConfig["component"] {
-  const template = getTemplate(id);
-  return template?.component ?? ProfessionalModern;
+  // Handle old template IDs for backward compatibility
+  const oldTemplateIdMap: Record<string, string> = {
+    "professional-modern": "bronzor",
+    "classic-traditional": "bronzor",
+    "tech-minimalist": "bronzor",
+    "two-column": "chikorita",
+    "ats-optimized": "bronzor",
+  };
+  
+  const mappedId = oldTemplateIdMap[id] || id;
+  const template = getTemplate(mappedId);
+  
+  // Always return a valid component, default to Bronzor
+  if (!template || !template.component) {
+    return Bronzor;
+  }
+  
+  return template.component;
 }

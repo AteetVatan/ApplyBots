@@ -45,6 +45,10 @@ class Models:
     # Embeddings
     BGE_LARGE = "BAAI/bge-large-en-v1.5"
 
+    # Vision models for document OCR
+    LLAMA_VISION_11B = "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo"
+    LLAMA_VISION_90B = "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo"
+
 
 def create_llm_config(
     *,
@@ -137,5 +141,56 @@ LLM_CONFIG_NEGOTIATION = create_llm_config(
 LLM_CONFIG_CAREER = create_llm_config(
     model=Models.LLAMA4_MAVERICK,  # ~$0.27/1M tokens - balanced
     temperature=0.5,  # Moderate creativity for recommendations
+    timeout=90,
+)
+
+# =============================================================================
+# Vision OCR Configuration (for PDF fallback extraction)
+# =============================================================================
+
+# Vision OCR: Extract text from scanned/image PDFs when local methods fail
+LLM_CONFIG_VISION_OCR = create_llm_config(
+    model=Models.LLAMA_VISION_11B,  # ~$0.18/1M tokens - cheapest vision model
+    temperature=0.1,  # Very low temp for accurate text extraction
+    timeout=60,
+)
+
+# =============================================================================
+# CareerKit Expert Apply LLM Configurations (Cost-Optimized Pipeline)
+# =============================================================================
+# Total estimated cost per Expert Apply: ~$0.02-0.04
+
+# JD Extraction: Extract requirements/keywords from job description
+LLM_CONFIG_CAREERKIT_JD_EXTRACTOR = create_llm_config(
+    model=Models.LLAMA4_SCOUT,  # ~$0.10/1M tokens - fast extraction
+    temperature=0.2,  # Low temp for accurate extraction
+    timeout=60,
+)
+
+# Gap Analysis: Analyze gaps between JD requirements and CV evidence
+LLM_CONFIG_CAREERKIT_GAP_ANALYZER = create_llm_config(
+    model=Models.LLAMA4_MAVERICK,  # ~$0.27/1M tokens - balanced reasoning
+    temperature=0.4,
+    timeout=90,
+)
+
+# Delta Generation: Generate KEEP/REWRITE/REMOVE/ADD instructions
+LLM_CONFIG_CAREERKIT_DELTA_GEN = create_llm_config(
+    model=Models.LLAMA4_MAVERICK,  # ~$0.27/1M tokens - analytical
+    temperature=0.3,
+    timeout=90,
+)
+
+# CV Polish: Final ATS-friendly formatting
+LLM_CONFIG_CAREERKIT_CV_POLISH = create_llm_config(
+    model=Models.LLAMA4_SCOUT,  # ~$0.10/1M tokens - light formatting
+    temperature=0.4,
+    timeout=60,
+)
+
+# Interview Prep: Generate interview questions and STAR stories
+LLM_CONFIG_CAREERKIT_INTERVIEW_PREP = create_llm_config(
+    model=Models.LLAMA4_MAVERICK,  # ~$0.27/1M tokens - analytical
+    temperature=0.5,  # Moderate creativity for interview scenarios
     timeout=90,
 )

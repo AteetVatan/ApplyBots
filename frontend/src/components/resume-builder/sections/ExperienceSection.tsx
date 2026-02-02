@@ -4,7 +4,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { useResumeBuilderStore, type WorkExperience } from "@/stores/resume-builder-store";
 import {
   Plus,
@@ -14,7 +14,13 @@ import {
   ChevronUp,
   Sparkles,
   Building2,
+  Loader2,
 } from "lucide-react";
+
+// Lazy load RichTextEditor to avoid SSR issues with Tiptap
+const RichTextEditor = lazy(() =>
+  import("../RichTextEditor").then((mod) => ({ default: mod.RichTextEditor }))
+);
 
 interface ExperienceCardProps {
   experience: WorkExperience;
@@ -29,7 +35,9 @@ function ExperienceCard({ experience, index, isExpanded, onToggle }: ExperienceC
   const [newAchievement, setNewAchievement] = useState("");
 
   const handleAddAchievement = () => {
-    if (newAchievement.trim()) {
+    // Strip HTML tags for empty check, but store as HTML
+    const plainText = newAchievement.replace(/<[^>]*>/g, "").trim();
+    if (plainText) {
       updateWorkExperience(experience.id, {
         achievements: [...experience.achievements, newAchievement.trim()],
       });
@@ -186,19 +194,30 @@ function ExperienceCard({ experience, index, isExpanded, onToggle }: ExperienceC
               {experience.achievements.map((ach, achIndex) => (
                 <div key={achIndex} className="flex items-start gap-2">
                   <span className="text-gray-400 mt-2">•</span>
-                  <input
-                    type="text"
-                    value={ach}
-                    onChange={(e) => {
-                      const newAchievements = [...experience.achievements];
-                      newAchievements[achIndex] = e.target.value;
-                      updateWorkExperience(experience.id, { achievements: newAchievements });
-                    }}
-                    className="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
+                  <div className="flex-1 min-w-0">
+                    <Suspense
+                      fallback={
+                        <div className="h-20 flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800">
+                          <Loader2 className="h-4 w-4 text-gray-400 animate-spin" />
+                        </div>
+                      }
+                    >
+                      <RichTextEditor
+                        content={ach || ""}
+                        onChange={(html) => {
+                          const newAchievements = [...experience.achievements];
+                          newAchievements[achIndex] = html;
+                          updateWorkExperience(experience.id, { achievements: newAchievements });
+                        }}
+                        placeholder="Enter achievement..."
+                        minHeight="80px"
+                        className="text-sm"
+                      />
+                    </Suspense>
+                  </div>
                   <button
                     onClick={() => handleRemoveAchievement(achIndex)}
-                    className="p-1 text-gray-400 hover:text-red-500"
+                    className="p-1 text-gray-400 hover:text-red-500 flex-shrink-0"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -207,22 +226,33 @@ function ExperienceCard({ experience, index, isExpanded, onToggle }: ExperienceC
             </div>
 
             {/* Add new achievement */}
-            <div className="flex items-center gap-2">
-              <span className="text-gray-400">•</span>
-              <input
-                type="text"
-                value={newAchievement}
-                onChange={(e) => setNewAchievement(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddAchievement()}
-                placeholder="Add an achievement (e.g., Increased sales by 20%...)"
-                className="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <button
-                onClick={handleAddAchievement}
-                className="p-1.5 bg-blue-500 text-white rounded hover:bg-blue-600"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
+            <div className="space-y-2">
+              <div className="flex items-start gap-2">
+                <span className="text-gray-400 mt-2">•</span>
+                <div className="flex-1 min-w-0">
+                  <Suspense
+                    fallback={
+                      <div className="h-20 flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800">
+                        <Loader2 className="h-4 w-4 text-gray-400 animate-spin" />
+                      </div>
+                    }
+                  >
+                    <RichTextEditor
+                      content={newAchievement}
+                      onChange={(html) => setNewAchievement(html)}
+                      placeholder="Add an achievement (e.g., Increased sales by 20%...)"
+                      minHeight="80px"
+                      className="text-sm"
+                    />
+                  </Suspense>
+                </div>
+                <button
+                  onClick={handleAddAchievement}
+                  className="p-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 flex-shrink-0"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               Tip: Start with action verbs and include numbers when possible

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/providers/Providers";
-import { getLocale } from "@/i18n";
+import { getLocale } from "@/i18n/server";
 
 const inter = Inter({
   variable: "--font-geist-sans",
@@ -27,9 +27,10 @@ export default async function RootLayout({
   const locale = await getLocale();
 
   return (
-    <html lang={locale} className="dark">
+    <html lang={locale} className="dark" suppressHydrationWarning>
       <body
         className={`${inter.variable} ${jetbrainsMono.variable} font-sans`}
+        suppressHydrationWarning
       >
         <Providers locale={locale}>{children}</Providers>
       </body>

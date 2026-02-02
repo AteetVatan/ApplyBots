@@ -150,16 +150,16 @@ async def seed_jobs():
                 )
 
                 await job_repo.upsert(job)
-                print(f"✓ Created job: {job.title} at {job.company}")
+                print(f"[OK] Created job: {job.title} at {job.company}")
 
             await session.commit()
 
-        print(f"\n✅ Seeded {len(SAMPLE_JOBS)} jobs successfully!")
+        print(f"\n[SUCCESS] Seeded {len(SAMPLE_JOBS)} jobs successfully!")
     except ProgrammingError as e:
         error_msg = str(e)
         if "does not exist" in error_msg or "UndefinedTableError" in error_msg:
-            print("\n❌ Error: Database tables do not exist!")
-            print("\n💡 Solution: Run database migrations first:")
+            print("\n[ERROR] Database tables do not exist!")
+            print("\n[TIP] Solution: Run database migrations first:")
             print("   cd backend")
             print("   alembic upgrade head")
             print("   cd ..")

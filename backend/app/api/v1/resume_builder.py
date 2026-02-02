@@ -10,12 +10,14 @@ import uuid
 from datetime import datetime
 
 import structlog
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, UploadFile, status
 
 from app.api.deps import AppSettings, CurrentUser, DBSession
+from app.infra.storage.s3 import S3Storage
 from app.core.domain.resume import (
     Award,
     Certification,
+    CustomLink,
     CustomSection,
     Education,
     LanguageProficiency,
@@ -30,7 +32,6 @@ from app.core.services.ai_content_service import AIContentService
 from app.core.services.ats_scoring_service import ATSScoringService
 from app.infra.db.repositories.resume_draft import SQLResumeDraftRepository
 from app.infra.db.repositories.job import SQLJobRepository
-from app.infra.services.pdf_generator import PDFGeneratorService
 from app.schemas.resume_builder import (
     ATSScoreRequest,
     ATSScoreResponse,
@@ -40,9 +41,9 @@ from app.schemas.resume_builder import (
     DraftUpdateRequest,
     EnhanceBulletRequest,
     EnhanceBulletResponse,
-    ExportPDFResponse,
     GenerateSummaryRequest,
     GenerateSummaryResponse,
+    ProfilePictureResponse,
     ResumeContentSchema,
     SuggestSkillsRequest,
     SuggestSkillsResponse,
@@ -72,6 +73,11 @@ def schema_to_content(schema: ResumeContentSchema) -> ResumeContent:
         linkedin_url=schema.linkedin_url,
         portfolio_url=schema.portfolio_url,
         github_url=schema.github_url,
+        profile_picture_url=schema.profile_picture_url,
+        custom_links=[
+            CustomLink(id=cl.id, label=cl.label, url=cl.url)
+            for cl in schema.custom_links
+        ],
         professional_summary=schema.professional_summary,
         work_experience=[
             WorkExperience(
@@ -161,6 +167,7 @@ def content_to_schema(content: ResumeContent) -> ResumeContentSchema:
     from app.schemas.resume_builder import (
         AwardSchema,
         CertificationSchema,
+        CustomLinkSchema,
         CustomSectionSchema,
         EducationSchema,
         LanguageSkillSchema,
@@ -177,6 +184,11 @@ def content_to_schema(content: ResumeContent) -> ResumeContentSchema:
         linkedin_url=content.linkedin_url,
         portfolio_url=content.portfolio_url,
         github_url=content.github_url,
+        profile_picture_url=content.profile_picture_url,
+        custom_links=[
+            CustomLinkSchema(id=cl.id, label=cl.label, url=cl.url)
+            for cl in content.custom_links
+        ],
         professional_summary=content.professional_summary,
         work_experience=[
             WorkExperienceSchema(
@@ -387,7 +399,7 @@ async def update_draft(
     return draft_to_response(updated)
 
 
-@router.delete("/drafts/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/drafts/{draft_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_draft(
     draft_id: str,
     user: CurrentUser,
@@ -592,68 +604,32 @@ async def calculate_ats_score(
 
 
 # ============================================================================
-# PDF Export Endpoint
-# ============================================================================
-
-
-@router.post("/drafts/{draft_id}/export-pdf", response_model=ExportPDFResponse)
-async def export_pdf(
-    draft_id: str,
-    user: CurrentUser,
-    db: DBSession,
-    template_id: str | None = None,
-) -> ExportPDFResponse:
-    """Export draft as PDF."""
-    repo = SQLResumeDraftRepository(session=db)
-    draft = await repo.get_by_id(draft_id)
-
-    if not draft or draft.user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Draft not found",
-        )
-
-    pdf_service = PDFGeneratorService()
-
-    # Generate PDF bytes
-    pdf_bytes = await pdf_service.generate_pdf(
-        content=draft.content,
-        template_id=template_id or draft.template_id,
-    )
-
-    # For now, return the PDF as base64 data URL
-    # In production, upload to S3 and return presigned URL
-    import base64
-
-    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    data_url = f"data:application/pdf;base64,{pdf_base64}"
-
-    filename = f"{draft.content.full_name or 'resume'}.pdf".replace(" ", "_")
-
-    logger.info(
-        "pdf_exported",
-        draft_id=draft_id,
-        user_id=user.id,
-        size_bytes=len(pdf_bytes),
-    )
-
-    return ExportPDFResponse(
-        url=data_url,
-        filename=filename,
-    )
-
-
-# ============================================================================
 # Template Endpoints
 # ============================================================================
+
+# Template metadata (PDF generation now happens on frontend)
+TEMPLATES = [
+    # Single-column (ATS Score: 95)
+    {"id": "bronzor", "name": "Bronzor", "description": "Clean, minimalist single-column design with profile picture left of name", "ats_score": 95},
+    {"id": "kakuna", "name": "Kakuna", "description": "Clean single-column design with subtle styling variations", "ats_score": 95},
+    {"id": "rhyhorn", "name": "Rhyhorn", "description": "Clean minimalist single-column design with professional layout", "ats_score": 95},
+    {"id": "onyx", "name": "Onyx", "description": "Single-column design with thin border and blue accent line", "ats_score": 95},
+    {"id": "lapras", "name": "Lapras", "description": "Single-column layout with pink/magenta header accent and elegant serif typography", "ats_score": 95},
+    {"id": "leafish", "name": "Leafish", "description": "Single-column layout with green accent bars and modern typography", "ats_score": 95},
+    # Two-column (ATS Score: 88)
+    {"id": "azurill", "name": "Azurill", "description": "Two-column layout with purple/magenta gradient sidebar", "ats_score": 88},
+    {"id": "chikorita", "name": "Chikorita", "description": "Two-column layout with green sidebar for profile, skills, and certifications", "ats_score": 88},
+    {"id": "ditto", "name": "Ditto", "description": "Two-column layout with teal/cyan RIGHT sidebar - unique reversed layout", "ats_score": 88},
+    {"id": "ditgar", "name": "Ditgar", "description": "Two-column layout with sky blue sidebar featuring skill progress bars", "ats_score": 88},
+    {"id": "gengar", "name": "Gengar", "description": "Two-column layout with blue sidebar for profile, skills, and certifications", "ats_score": 88},
+    {"id": "glalie", "name": "Glalie", "description": "Two-column layout with dark emerald sidebar - compact professional design", "ats_score": 88},
+    {"id": "pikachu", "name": "Pikachu", "description": "Two-column layout with vibrant yellow/gold sidebar", "ats_score": 88},
+]
 
 
 @router.get("/templates", response_model=TemplateListResponse)
 async def list_templates() -> TemplateListResponse:
     """List available resume templates."""
-    pdf_service = PDFGeneratorService()
-    templates = pdf_service.get_available_templates()
-
     return TemplateListResponse(
         templates=[
             TemplateSchema(
@@ -662,6 +638,83 @@ async def list_templates() -> TemplateListResponse:
                 description=t["description"],
                 ats_score=t["ats_score"],
             )
-            for t in templates
+            for t in TEMPLATES
         ]
+    )
+
+
+# ============================================================================
+# Profile Picture Endpoints
+# ============================================================================
+
+# Allowed image MIME types and extensions
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+}
+MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+
+
+@router.post("/profile-picture", response_model=ProfilePictureResponse)
+async def upload_profile_picture(
+    file: UploadFile,
+    user: CurrentUser,
+    settings: AppSettings,
+) -> ProfilePictureResponse:
+    """Upload a profile picture for the resume.
+
+    - Accepts JPEG, PNG, or WebP images
+    - Maximum file size: 5MB
+    - Returns the URL to the uploaded image
+    """
+    # Validate content type
+    content_type = file.content_type or ""
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid file type. Allowed types: JPEG, PNG, WebP. Got: {content_type}",
+        )
+
+    # Read file content
+    content = await file.read()
+
+    # Validate file size
+    if len(content) > MAX_IMAGE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File too large. Maximum size: 5MB. Got: {len(content) / 1024 / 1024:.2f}MB",
+        )
+
+    # Generate unique filename
+    file_ext = ALLOWED_IMAGE_TYPES[content_type]
+    file_id = str(uuid.uuid4())
+    s3_key = f"profile-pictures/{user.id}/{file_id}.{file_ext}"
+
+    # Upload to S3
+    storage = S3Storage(
+        endpoint=settings.s3_endpoint,
+        access_key=settings.s3_access_key.get_secret_value(),
+        secret_key=settings.s3_secret_key.get_secret_value(),
+        bucket=settings.s3_bucket,
+        region=settings.s3_region,
+    )
+
+    url = await storage.upload(
+        key=s3_key,
+        data=content,
+        content_type=content_type,
+    )
+
+    logger.info(
+        "profile_picture_uploaded",
+        user_id=user.id,
+        s3_key=s3_key,
+        size_bytes=len(content),
+        content_type=content_type,
+    )
+
+    return ProfilePictureResponse(
+        url=url,
+        filename=file.filename or f"{file_id}.{file_ext}",
     )

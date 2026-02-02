@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import get_current_user, get_db_session
+from app.api.deps import get_current_user, get_db
 from app.core.domain.alert import AlertType as DomainAlertType
 from app.core.services.alerts import AlertService
 from app.infra.db.repositories.alert import (
@@ -38,7 +38,7 @@ def _get_alert_service(session) -> AlertService:
 
 @router.get("", response_model=AlertsPageResponse)
 async def get_alerts(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
     unread_only: bool = Query(False, description="Filter to unread alerts only"),
     limit: int = Query(50, ge=1, le=100, description="Max alerts to return"),
@@ -74,7 +74,7 @@ async def get_alerts(
 
 @router.get("/unread-count", response_model=UnreadCountResponse)
 async def get_unread_count(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Get count of unread alerts."""
@@ -83,12 +83,12 @@ async def get_unread_count(
     return UnreadCountResponse(count=count)
 
 
-@router.post("/{alert_id}/read", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{alert_id}/read", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def mark_alert_read(
     alert_id: str,
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
-):
+) -> None:
     """Mark a single alert as read."""
     service = _get_alert_service(session)
 
@@ -109,21 +109,23 @@ async def mark_alert_read(
         )
 
     await service.mark_read(alert_id)
+    return None
 
 
-@router.post("/read-all", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/read-all", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def mark_all_read(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
-):
+) -> None:
     """Mark all alerts as read."""
     service = _get_alert_service(session)
     await service.mark_all_read(current_user.id)
+    return None
 
 
 @router.get("/preferences", response_model=AlertPreferencesResponse)
 async def get_preferences(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Get alert preferences for the current user."""
@@ -141,7 +143,7 @@ async def get_preferences(
 @router.put("/preferences", response_model=AlertPreferencesResponse)
 async def update_preferences(
     request: AlertPreferencesUpdateRequest,
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Update alert preferences."""

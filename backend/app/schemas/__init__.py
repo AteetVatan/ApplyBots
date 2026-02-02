@@ -42,6 +42,16 @@ from app.schemas.billing import (
     PortalResponse,
     UsageResponse,
 )
+from app.schemas.career_kit import (
+    AnalyzeRequest,
+    AnalyzeResponse,
+    AvailableResumesResponse,
+    GenerateRequest,
+    GenerateResponse,
+    ResumeSourceSchema,
+    SessionDetailResponse,
+    SessionListResponse,
+)
 
 __all__ = [
     # Auth
@@ -80,4 +90,13 @@ __all__ = [
     "PlansResponse",
     "PortalResponse",
     "UsageResponse",
+    # CareerKit
+    "AnalyzeRequest",
+    "AnalyzeResponse",
+    "AvailableResumesResponse",
+    "GenerateRequest",
+    "GenerateResponse",
+    "ResumeSourceSchema",
+    "SessionDetailResponse",
+    "SessionListResponse",
 ]

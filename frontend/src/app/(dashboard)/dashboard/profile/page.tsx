@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Upload, FileText, Loader2, Check } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Upload, FileText, Loader2, Check, Trash2 } from "lucide-react";
 
 interface ProfileData {
   id: string;
@@ -15,12 +15,20 @@ interface ProfileData {
   portfolio_url: string | null;
 }
 
+interface ResumeData {
+  id: string;
+  filename: string;
+  is_primary: boolean;
+  created_at: string;
+}
+
 export default function ProfilePage() {
+  const queryClient = useQueryClient();
   const [fullName, setFullName] = useState("");
   const [headline, setHeadline] = useState("");
   const [location, setLocation] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [resumeFile, setResumeFile] = useState<string | null>(null);
+  const [deletingResumeId, setDeletingResumeId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -36,6 +44,21 @@ export default function ProfilePage() {
       });
       if (!response.ok) {
         throw new Error("Failed to fetch profile");
+      }
+      return response.json();
+    },
+  });
+
+  // Fetch existing resumes
+  const { data: resumes } = useQuery<ResumeData[]>({
+    queryKey: ["resumes"],
+    queryFn: async () => {
+      const token = localStorage.getItem("ApplyBots_access_token");
+      const response = await fetch("/api/v1/profile/resumes", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch resumes");
       }
       return response.json();
     },
@@ -71,7 +94,7 @@ export default function ProfilePage() {
       });
 
       if (response.ok) {
-        setResumeFile(file.name);
+        queryClient.invalidateQueries({ queryKey: ["resumes"] });
       } else {
         setUploadError("Upload failed. Please try again.");
       }
@@ -79,6 +102,28 @@ export default function ProfilePage() {
       setUploadError("Upload failed. Please try again.");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleDeleteResume = async (resumeId: string) => {
+    setDeletingResumeId(resumeId);
+
+    try {
+      const token = localStorage.getItem("ApplyBots_access_token");
+      const response = await fetch(`/api/v1/profile/resumes/${resumeId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        queryClient.invalidateQueries({ queryKey: ["resumes"] });
+      }
+    } catch {
+      // Silently fail - could add error state if needed
+    } finally {
+      setDeletingResumeId(null);
     }
   };
 
@@ -138,11 +183,39 @@ export default function ProfilePage() {
             disabled={uploading}
           />
 
-          {resumeFile ? (
-            <div className="flex items-center justify-center gap-3">
-              <FileText className="w-8 h-8 text-primary-400" />
-              <span className="text-neutral-300">{resumeFile}</span>
-              <Check className="w-5 h-5 text-success-500" />
+          {resumes && resumes.length > 0 ? (
+            <div className="space-y-3">
+              {resumes.map((resume) => (
+                <div key={resume.id} className="flex items-center justify-between p-3 bg-neutral-800 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <FileText className="w-6 h-6 text-primary-400" />
+                    <div>
+                      <span className="text-neutral-300">{resume.filename}</span>
+                      {resume.is_primary && (
+                        <span className="ml-2 text-xs text-primary-400">(Primary)</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Check className="w-5 h-5 text-success-500" />
+                    <button
+                      onClick={() => handleDeleteResume(resume.id)}
+                      disabled={deletingResumeId === resume.id}
+                      className="p-1 text-neutral-500 hover:text-red-400 transition-colors disabled:opacity-50"
+                      title="Remove resume"
+                    >
+                      {deletingResumeId === resume.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <label htmlFor="resume" className="cursor-pointer block text-center text-sm text-primary-400 hover:text-primary-300 mt-2">
+                + Upload another resume
+              </label>
             </div>
           ) : uploading ? (
             <div className="flex flex-col items-center gap-3">

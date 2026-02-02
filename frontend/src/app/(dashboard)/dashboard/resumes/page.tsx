@@ -12,19 +12,20 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type Resume } from "@/lib/api";
+import { api, type Resume, type ResumeDraft } from "@/lib/api";
+import { useDrafts, useDeleteDraft } from "@/hooks/useResumeDrafts";
+import { useResumeBuilderStore } from "@/stores/resume-builder-store";
 import {
   FileText,
   Upload,
   Trash2,
   Star,
   StarOff,
-  Download,
   AlertCircle,
-  CheckCircle,
   Loader2,
-  PenLine,
   Sparkles,
+  PenLine,
+  Clock,
 } from "lucide-react";
 
 export default function ResumesPage() {
@@ -33,12 +34,19 @@ export default function ResumesPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reset = useResumeBuilderStore((state) => state.reset);
 
-  // Fetch resumes
-  const { data: resumeData, isLoading } = useQuery({
+  // Fetch uploaded resumes
+  const { data: resumeData, isLoading: isLoadingResumes } = useQuery({
     queryKey: ["resumes"],
     queryFn: () => api.getResumes(),
   });
+
+  // Fetch builder drafts
+  const { data: draftsData, isLoading: isLoadingDrafts } = useDrafts();
+  const deleteDraftMutation = useDeleteDraft();
+
+  const isLoading = isLoadingResumes || isLoadingDrafts;
 
   // Upload mutation
   const uploadMutation = useMutation({
@@ -101,6 +109,7 @@ export default function ResumesPage() {
   };
 
   const resumes = resumeData?.items || [];
+  const drafts = draftsData?.items || [];
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -117,7 +126,11 @@ export default function ResumesPage() {
       <div className="mb-8 grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Create with Builder - Primary action */}
         <button
-          onClick={() => router.push("/dashboard/resumes/builder")}
+          onClick={() => {
+            // Reset store to start fresh
+            reset();
+            router.push("/dashboard/resumes/builder");
+          }}
           className="group relative flex flex-col items-center justify-center p-8 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600 transition-all shadow-lg hover:shadow-xl hover:scale-[1.02]"
         >
           <div className="absolute -top-2 -right-2 px-2 py-1 bg-yellow-400 text-yellow-900 text-xs font-bold rounded-full shadow">
@@ -176,28 +189,62 @@ export default function ResumesPage() {
         <div className="flex justify-center py-12">
           <Loader2 className="h-8 w-8 text-gray-400 animate-spin" />
         </div>
-      ) : resumes.length === 0 ? (
+      ) : drafts.length === 0 && resumes.length === 0 ? (
         <div className="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
           <FileText className="h-12 w-12 text-gray-400 mx-auto mb-3" />
           <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">
             No resumes yet
           </h3>
           <p className="text-gray-600 dark:text-gray-400">
-            Upload your first resume to get started
+            Create a resume with our AI builder or upload an existing one
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {resumes.map((resume) => (
-            <ResumeCard
-              key={resume.id}
-              resume={resume}
-              onSetPrimary={() => setPrimaryMutation.mutate(resume.id)}
-              onDelete={() => deleteMutation.mutate(resume.id)}
-              isDeleting={deleteMutation.isPending}
-              isSettingPrimary={setPrimaryMutation.isPending}
-            />
-          ))}
+        <div className="space-y-6">
+          {/* Builder Drafts Section */}
+          {drafts.length > 0 && (
+            <div>
+              <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3 flex items-center gap-2">
+                <PenLine className="h-4 w-4" />
+                Resume Builder Drafts
+              </h2>
+              <div className="space-y-3">
+                {drafts.map((draft) => (
+                  <DraftCard
+                    key={draft.id}
+                    draft={draft}
+                    onEdit={() => router.push(`/dashboard/resumes/builder?draftId=${draft.id}`)}
+                    onDelete={() => deleteDraftMutation.mutate(draft.id)}
+                    isDeleting={deleteDraftMutation.isPending}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Uploaded Resumes Section */}
+          {resumes.length > 0 && (
+            <div>
+              {drafts.length > 0 && (
+                <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3 flex items-center gap-2">
+                  <Upload className="h-4 w-4" />
+                  Uploaded Resumes
+                </h2>
+              )}
+              <div className="space-y-3">
+                {resumes.map((resume) => (
+                  <ResumeCard
+                    key={resume.id}
+                    resume={resume}
+                    onSetPrimary={() => setPrimaryMutation.mutate(resume.id)}
+                    onDelete={() => deleteMutation.mutate(resume.id)}
+                    isDeleting={deleteMutation.isPending}
+                    isSettingPrimary={setPrimaryMutation.isPending}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -342,6 +389,133 @@ function ResumeCard({
           <div className="flex items-center justify-between bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">
             <span className="text-sm text-red-800 dark:text-red-300">
               Delete this resume?
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowConfirmDelete(false)}
+                className="px-3 py-1 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  onDelete();
+                  setShowConfirmDelete(false);
+                }}
+                className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// Draft Card Component
+// =============================================================================
+
+interface DraftCardProps {
+  draft: ResumeDraft;
+  onEdit: () => void;
+  onDelete: () => void;
+  isDeleting: boolean;
+}
+
+function DraftCard({ draft, onEdit, onDelete, isDeleting }: DraftCardProps) {
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+
+  const content = draft.content;
+  const hasContent = content.full_name || content.work_experience?.length > 0;
+
+  // Format date
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return null;
+    return new Date(dateStr).toLocaleDateString();
+  };
+
+  return (
+    <div
+      className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 shadow-sm hover:border-purple-300 dark:hover:border-purple-700 transition-colors cursor-pointer group"
+      onClick={onEdit}
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-900/30 dark:to-pink-900/30 rounded-lg">
+            <PenLine className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-medium text-gray-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
+                {draft.name}
+              </h3>
+              {draft.ats_score !== null && (
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ${
+                    draft.ats_score >= 80
+                      ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300"
+                      : draft.ats_score >= 60
+                      ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300"
+                      : "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300"
+                  }`}
+                >
+                  ATS: {draft.ats_score}%
+                </span>
+              )}
+            </div>
+            {hasContent ? (
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
+                {content.full_name || "No name set"}
+                {content.work_experience?.length > 0 &&
+                  ` • ${content.work_experience.length} job${content.work_experience.length > 1 ? "s" : ""}`}
+              </p>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-500 mt-0.5 italic">
+                Empty draft - click to edit
+              </p>
+            )}
+            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-500 mt-1">
+              <Clock className="h-3 w-3" />
+              <span>
+                {draft.updated_at
+                  ? `Updated ${formatDate(draft.updated_at)}`
+                  : `Created ${formatDate(draft.created_at)}`}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowConfirmDelete(true);
+            }}
+            disabled={isDeleting}
+            className="p-2 text-gray-500 hover:text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
+            title="Delete draft"
+          >
+            {isDeleting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Delete Confirmation */}
+      {showConfirmDelete && (
+        <div
+          className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">
+            <span className="text-sm text-red-800 dark:text-red-300">
+              Delete this draft?
             </span>
             <div className="flex gap-2">
               <button

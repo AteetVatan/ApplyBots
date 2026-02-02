@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "f8g0h2i4j6k8"
@@ -19,16 +20,27 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # Create RemoteType enum
-    remote_type_enum = sa.Enum(
+    # Create RemoteType enum via raw SQL
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE remotetype AS ENUM (
+                'onsite', 'hybrid', 'remote', 'remote_us', 'remote_global'
+            );
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+
+    # Reference existing enum type
+    remote_type_enum = postgresql.ENUM(
         "onsite",
         "hybrid",
         "remote",
         "remote_us",
         "remote_global",
         name="remotetype",
+        create_type=False,
     )
-    remote_type_enum.create(op.get_bind(), checkfirst=True)
 
     # Add remote work columns to jobs table
     op.add_column(
@@ -75,5 +87,5 @@ def downgrade() -> None:
     op.drop_column("jobs", "remote_score")
     op.drop_column("jobs", "remote_type")
 
-    # Drop RemoteType enum
-    sa.Enum(name="remotetype").drop(op.get_bind(), checkfirst=True)
+    # Drop RemoteType enum via raw SQL
+    op.execute("DROP TYPE IF EXISTS remotetype")

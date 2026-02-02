@@ -3,8 +3,22 @@
 Standards: python_clean.mdc
 - Coordinates storage and parsing
 - Generates embeddings for semantic search
+- Multi-library PDF extraction with AI fallback
+
+Extraction Flow:
+┌─────────────┐   ┌──────────────┐   ┌─────────────┐
+│   pypdf     │ → │ pdfplumber   │ → │ pdfminer    │
+│ (BSD-3, $0) │   │ (MIT, $0)    │   │ (MIT, $0)   │
+└─────────────┘   └──────────────┘   └─────────────┘
+                          │
+                          ▼
+                ┌─────────────────┐   ┌──────────────────┐
+                │ Tesseract OCR   │ → │ Together Vision  │
+                │ (Apache, $0)    │   │ (~$0.002/resume) │
+                └─────────────────┘   └──────────────────┘
 """
 
+import base64
 import io
 import uuid
 from dataclasses import dataclass
@@ -24,12 +38,22 @@ logger = structlog.get_logger(__name__)
 # Collection name for resume embeddings
 RESUMES_COLLECTION = "resumes"
 
+# Minimum text length threshold for valid extraction
+MIN_TEXT_THRESHOLD = 50
+
+# Vision OCR prompt for resume text extraction
+VISION_OCR_PROMPT = """Extract ALL text from this resume image exactly as written.
+Preserve the structure and formatting.
+Include: name, contact info, work experience, education, skills, and any other sections.
+Return ONLY the extracted text, no commentary or explanations."""
+
 
 class ExtractionMethod(Enum):
     """Method used to extract text from PDF."""
 
-    NATIVE = "native"
-    OCR = "ocr"
+    NATIVE = "native"  # pypdf, pdfplumber, or pdfminer
+    OCR = "ocr"  # Local Tesseract OCR
+    VISION_AI = "vision_ai"  # Together AI Vision model
     FAILED = "failed"
 
 
@@ -42,6 +66,7 @@ class PDFExtractionResult:
     page_count: int
     is_encrypted: bool = False
     ocr_available: bool = True
+    extraction_library: str | None = None  # Which library succeeded (pypdf, pdfplumber, etc)
     error_message: str | None = None
 
 
@@ -192,18 +217,21 @@ class ResumeService:
             return None
 
     async def _extract_pdf_text(self, content: bytes) -> str:
-        """Extract text from PDF using pdfplumber with OCR fallback.
+        """Extract text from PDF using multi-library fallback chain.
 
         Strategy:
-        1. Try native text extraction (fast, works for text-based PDFs)
-        2. If empty/insufficient, check for images and attempt OCR
-        3. Log extraction method and any issues for debugging
+        1. pypdf - Fast, lightweight extraction
+        2. pdfplumber - Good for structured documents
+        3. pdfminer.six - Handles complex layouts
+        4. Local Tesseract OCR - For scanned PDFs
+        5. Together AI Vision - AI fallback for problematic PDFs
         """
         result = await self._extract_pdf_with_metadata(content)
 
         logger.info(
             "pdf_extraction_complete",
             method=result.method.value,
+            extraction_library=result.extraction_library,
             page_count=result.page_count,
             text_length=len(result.text),
             is_encrypted=result.is_encrypted,
@@ -214,114 +242,276 @@ class ResumeService:
         return result.text
 
     async def _extract_pdf_with_metadata(self, content: bytes) -> PDFExtractionResult:
-        """Extract text from PDF with detailed metadata about the extraction."""
-        try:
-            import pdfplumber  # type: ignore[import-not-found]
-        except ImportError:
-            logger.error("pdfplumber_not_installed")
-            return PDFExtractionResult(
-                text="",
-                method=ExtractionMethod.FAILED,
-                page_count=0,
-                error_message="pdfplumber not installed",
-            )
+        """Extract text from PDF using multi-library fallback chain with AI fallback.
 
-        try:
-            pdf = pdfplumber.open(io.BytesIO(content))
-        except Exception as e:
-            # pdfplumber raises exception for encrypted PDFs it cannot open
-            error_str = str(e).lower()
-            if "password" in error_str or "encrypt" in error_str:
-                logger.warning("pdf_encrypted", error=str(e))
-                return PDFExtractionResult(
-                    text="",
-                    method=ExtractionMethod.FAILED,
-                    page_count=0,
-                    is_encrypted=True,
-                    error_message="PDF is password-protected",
-                )
-            logger.warning("pdf_open_failed", error=str(e))
-            return PDFExtractionResult(
-                text="",
-                method=ExtractionMethod.FAILED,
-                page_count=0,
-                error_message=f"Failed to open PDF: {e}",
-            )
-
-        page_count = len(pdf.pages)
-
-        # First pass: native text extraction
-        text_parts: list[str] = []
+        Extraction priority (MIT-compatible):
+        1. pypdf - Fast, lightweight (BSD-3-Clause)
+        2. pdfplumber - Good for structured text (MIT)
+        3. pdfminer.six - Handles complex layouts (MIT)
+        4. Local Tesseract OCR - For scanned PDFs (Apache 2.0)
+        5. Together AI Vision - AI fallback for problematic PDFs
+        """
+        page_count = 0
         has_images = False
 
-        for page in pdf.pages:
-            page_text = page.extract_text() or ""
-            text_parts.append(page_text)
-
-            # Check if page has images (potential scanned content)
-            if not page_text.strip():
-                if page.images:
-                    has_images = True
-
-        pdf.close()
-        native_text = "\n".join(text_parts).strip()
-
-        # If we got sufficient text, return it
-        if len(native_text) >= 50:  # Minimum threshold for valid content
+        # Method 1: Try pypdf (fastest, most lightweight)
+        text, page_count = await self._try_pypdf(content)
+        if text and len(text) >= MIN_TEXT_THRESHOLD:
+            logger.info("pypdf_extraction_success", text_length=len(text))
             return PDFExtractionResult(
-                text=native_text,
+                text=text,
                 method=ExtractionMethod.NATIVE,
                 page_count=page_count,
+                extraction_library="pypdf",
             )
 
-        # Check OCR availability upfront for better error messages
+        # Method 2: Try pdfplumber (good for structured documents)
+        text, page_count, has_images = await self._try_pdfplumber(content)
+        if text and len(text) >= MIN_TEXT_THRESHOLD:
+            logger.info("pdfplumber_extraction_success", text_length=len(text))
+            return PDFExtractionResult(
+                text=text,
+                method=ExtractionMethod.NATIVE,
+                page_count=page_count,
+                extraction_library="pdfplumber",
+            )
+
+        # Method 3: Try pdfminer.six (handles complex layouts)
+        text = await self._try_pdfminer(content)
+        if text and len(text) >= MIN_TEXT_THRESHOLD:
+            logger.info("pdfminer_extraction_success", text_length=len(text))
+            return PDFExtractionResult(
+                text=text,
+                method=ExtractionMethod.NATIVE,
+                page_count=page_count or 1,
+                extraction_library="pdfminer",
+            )
+
+        # Check OCR availability
         ocr_available = self._is_tesseract_available()
 
-        # If native extraction failed and there are images, try OCR
-        if has_images or not native_text:
-            if ocr_available:
-                ocr_text = await self._attempt_ocr_extraction(content)
-                if ocr_text and len(ocr_text) > len(native_text):
-                    return PDFExtractionResult(
-                        text=ocr_text,
-                        method=ExtractionMethod.OCR,
-                        page_count=page_count,
-                        ocr_available=True,
-                    )
-            else:
-                logger.warning(
-                    "ocr_unavailable_scanned_pdf",
-                    has_images=has_images,
-                    native_text_length=len(native_text),
+        # Method 4: Try local Tesseract OCR (free, if available)
+        if ocr_available:
+            ocr_text = await self._attempt_ocr_extraction(content)
+            if ocr_text and len(ocr_text) >= MIN_TEXT_THRESHOLD:
+                logger.info("tesseract_ocr_success", text_length=len(ocr_text))
+                return PDFExtractionResult(
+                    text=ocr_text,
+                    method=ExtractionMethod.OCR,
+                    page_count=page_count or 1,
+                    ocr_available=True,
+                    extraction_library="tesseract",
                 )
 
-        # Return whatever we have (even if empty)
-        if native_text:
+        # Method 5: Try Together AI Vision OCR (paid fallback)
+        vision_text = await self._extract_with_vision_ocr(content)
+        if vision_text and len(vision_text) >= MIN_TEXT_THRESHOLD:
+            logger.info("vision_ai_ocr_success", text_length=len(vision_text))
             return PDFExtractionResult(
-                text=native_text,
-                method=ExtractionMethod.NATIVE,
-                page_count=page_count,
+                text=vision_text,
+                method=ExtractionMethod.VISION_AI,
+                page_count=page_count or 1,
                 ocr_available=ocr_available,
+                extraction_library="together_vision",
             )
 
-        # Build specific error message based on what failed
+        # All methods failed - build specific error message
         if has_images and not ocr_available:
             error_msg = (
-                "PDF appears to be scanned/image-based but OCR is unavailable. "
-                "Install Tesseract OCR or upload a text-based PDF."
+                "PDF appears to be scanned/image-based but local OCR is unavailable. "
+                "AI extraction was attempted but could not extract sufficient text."
             )
         elif has_images:
-            error_msg = "PDF is scanned/image-based and OCR could not extract text."
+            error_msg = "PDF is scanned/image-based. All extraction methods failed."
         else:
-            error_msg = "No text could be extracted from PDF."
+            error_msg = "No text could be extracted from PDF using any available method."
+
+        logger.warning(
+            "all_extraction_methods_failed",
+            page_count=page_count,
+            has_images=has_images,
+            ocr_available=ocr_available,
+        )
 
         return PDFExtractionResult(
             text="",
             method=ExtractionMethod.FAILED,
-            page_count=page_count,
+            page_count=page_count or 0,
             ocr_available=ocr_available,
             error_message=error_msg,
         )
+
+    async def _try_pypdf(self, content: bytes) -> tuple[str, int]:
+        """Try text extraction using pypdf (BSD-3-Clause license).
+
+        Returns:
+            Tuple of (extracted_text, page_count)
+        """
+        try:
+            from pypdf import PdfReader  # type: ignore[import-not-found]
+
+            pdf = PdfReader(io.BytesIO(content))
+            page_count = len(pdf.pages)
+            text_parts: list[str] = []
+
+            for page in pdf.pages:
+                page_text = page.extract_text() or ""
+                text_parts.append(page_text)
+
+            text = "\n".join(text_parts).strip()
+            return text, page_count
+
+        except ImportError:
+            logger.debug("pypdf_not_installed")
+            return "", 0
+        except Exception as e:
+            logger.debug("pypdf_extraction_failed", error=str(e))
+            return "", 0
+
+    async def _try_pdfplumber(self, content: bytes) -> tuple[str, int, bool]:
+        """Try text extraction using pdfplumber (MIT license).
+
+        Returns:
+            Tuple of (extracted_text, page_count, has_images)
+        """
+        try:
+            import pdfplumber  # type: ignore[import-not-found]
+
+            pdf = pdfplumber.open(io.BytesIO(content))
+            page_count = len(pdf.pages)
+            text_parts: list[str] = []
+            has_images = False
+
+            for page in pdf.pages:
+                page_text = page.extract_text() or ""
+                text_parts.append(page_text)
+
+                # Check if page has images (potential scanned content)
+                if not page_text.strip() and page.images:
+                    has_images = True
+
+            pdf.close()
+            text = "\n".join(text_parts).strip()
+            return text, page_count, has_images
+
+        except ImportError:
+            logger.debug("pdfplumber_not_installed")
+            return "", 0, False
+        except Exception as e:
+            error_str = str(e).lower()
+            if "password" in error_str or "encrypt" in error_str:
+                logger.warning("pdf_encrypted", error=str(e))
+            else:
+                logger.debug("pdfplumber_extraction_failed", error=str(e))
+            return "", 0, False
+
+    async def _try_pdfminer(self, content: bytes) -> str:
+        """Try text extraction using pdfminer.six (MIT license).
+
+        Handles complex PDF layouts better than other libraries.
+        """
+        try:
+            from pdfminer.high_level import extract_text  # type: ignore[import-not-found]
+
+            text = extract_text(io.BytesIO(content)).strip()
+            return text
+
+        except ImportError:
+            logger.debug("pdfminer_not_installed")
+            return ""
+        except Exception as e:
+            logger.debug("pdfminer_extraction_failed", error=str(e))
+            return ""
+
+    async def _extract_with_vision_ocr(self, content: bytes) -> str:
+        """Extract text from PDF using Together AI Vision model.
+
+        Converts PDF pages to images and uses Llama Vision for text extraction.
+        This is a paid fallback used when all local methods fail.
+
+        Cost: ~$0.002 per 2-page resume with Llama-3.2-11B-Vision-Instruct-Turbo.
+
+        Returns:
+            Extracted text from all pages, or empty string on failure.
+        """
+        try:
+            from pdf2image import convert_from_bytes  # type: ignore[import-not-found]
+        except ImportError:
+            logger.warning("pdf2image_not_installed_for_vision_ocr")
+            return ""
+
+        # Get Together AI client
+        try:
+            from app.config import get_settings
+            from app.infra.llm.together_client import TogetherLLMClient
+            from app.agents.config import Models
+
+            settings = get_settings()
+            vision_client = TogetherLLMClient(
+                api_key=settings.together_api_key.get_secret_value(),
+                timeout=60.0,
+            )
+        except Exception as e:
+            logger.warning("vision_client_init_failed", error=str(e))
+            return ""
+
+        try:
+            # Convert PDF to images at 200 DPI (balance between quality and cost)
+            images = convert_from_bytes(content, dpi=200)
+
+            logger.info(
+                "vision_ocr_started",
+                page_count=len(images),
+                model=Models.LLAMA_VISION_11B,
+            )
+
+            text_parts: list[str] = []
+
+            for page_num, image in enumerate(images):
+                try:
+                    # Convert PIL Image to base64
+                    buffer = io.BytesIO()
+                    image.save(buffer, format="PNG")
+                    image_b64 = base64.b64encode(buffer.getvalue()).decode()
+
+                    # Call Together AI Vision model
+                    page_text = await vision_client.complete_vision(
+                        image_base64=image_b64,
+                        prompt=VISION_OCR_PROMPT,
+                        model=Models.LLAMA_VISION_11B,
+                        temperature=0.1,
+                        max_tokens=4096,
+                    )
+
+                    text_parts.append(page_text)
+
+                    logger.debug(
+                        "vision_ocr_page_complete",
+                        page_num=page_num,
+                        text_length=len(page_text),
+                    )
+
+                except Exception as e:
+                    logger.warning(
+                        "vision_ocr_page_failed",
+                        page_num=page_num,
+                        error=str(e),
+                    )
+                    text_parts.append("")
+
+            combined_text = "\n\n".join(text_parts).strip()
+
+            logger.info(
+                "vision_ocr_complete",
+                page_count=len(images),
+                total_text_length=len(combined_text),
+            )
+
+            return combined_text
+
+        except Exception as e:
+            logger.warning("vision_ocr_extraction_failed", error=str(e))
+            return ""
 
     async def _attempt_ocr_extraction(self, content: bytes) -> str:
         """Attempt OCR extraction on PDF pages using pdf2image.

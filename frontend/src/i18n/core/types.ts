@@ -12,7 +12,7 @@ import type { en } from "../locales/en";
 // ---------------------------------------------------------------------------
 
 /** Supported locale codes */
-export type Locale = "en" | "de";
+export type Locale = "en" | "es" | "fr" | "de";
 
 // ---------------------------------------------------------------------------
 // Dictionary Types

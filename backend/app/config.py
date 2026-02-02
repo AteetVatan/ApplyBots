@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     # Company Intelligence APIs
     newsapi_key: SecretStr = SecretStr("")
 
+    # Frontend URL (for Playwright PDF rendering)
+    frontend_url: str = "http://localhost:3000"
+
     # Feature Flags
     feature_company_intel: bool = True
     feature_gamification: bool = True

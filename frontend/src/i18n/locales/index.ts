@@ -7,6 +7,8 @@
 
 import type { Locale, Dictionary } from "../core/types";
 import { en } from "./en";
+import { es } from "./es";
+import { fr } from "./fr";
 import { de } from "./de";
 
 /**
@@ -15,6 +17,8 @@ import { de } from "./de";
  */
 export const dictionaries: Record<Locale, Dictionary> = {
   en,
+  es,
+  fr,
   de,
 };
 

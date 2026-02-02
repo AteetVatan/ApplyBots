@@ -633,7 +633,7 @@ async def update_application_stage(
     )
 
 
-@router.post("/{application_id}/reject", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{application_id}/reject", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def reject_application(
     application_id: str,
     current_user: CurrentUser,
@@ -696,7 +696,7 @@ async def add_note(
     return NoteResponse(id=note.id, content=note.content, created_at=note.created_at)
 
 
-@router.delete("/{application_id}/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{application_id}/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_note(
     application_id: str,
     note_id: str,

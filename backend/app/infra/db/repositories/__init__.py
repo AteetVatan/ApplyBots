@@ -3,6 +3,7 @@
 from app.infra.db.repositories.application import SQLApplicationRepository
 from app.infra.db.repositories.audit import SQLAuditRepository
 from app.infra.db.repositories.campaign import SQLCampaignRepository
+from app.infra.db.repositories.career_kit import SQLCareerKitSessionRepository
 from app.infra.db.repositories.job import SQLJobRepository
 from app.infra.db.repositories.profile import SQLProfileRepository
 from app.infra.db.repositories.resume import SQLResumeRepository
@@ -14,6 +15,7 @@ __all__ = [
     "SQLApplicationRepository",
     "SQLAuditRepository",
     "SQLCampaignRepository",
+    "SQLCareerKitSessionRepository",
     "SQLJobRepository",
     "SQLProfileRepository",
     "SQLResumeRepository",

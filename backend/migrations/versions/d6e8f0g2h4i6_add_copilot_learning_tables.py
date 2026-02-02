@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'd6e8f0g2h4i6'
@@ -19,12 +20,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add answer_edits table and campaign learning fields."""
-    # Create RecommendationMode enum type
-    recommendation_mode_enum = sa.Enum(
+    # Create RecommendationMode enum type via raw SQL
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE recommendationmode AS ENUM ('keyword', 'learned');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+
+    # Reference existing enum type
+    recommendation_mode_enum = postgresql.ENUM(
         'keyword', 'learned',
-        name='recommendationmode'
+        name='recommendationmode',
+        create_type=False
     )
-    recommendation_mode_enum.create(op.get_bind(), checkfirst=True)
 
     # Create answer_edits table for learning from user corrections
     op.create_table(
@@ -84,6 +94,5 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_answer_edits_user_id'), table_name='answer_edits')
     op.drop_table('answer_edits')
 
-    # Drop enum type
-    recommendation_mode_enum = sa.Enum(name='recommendationmode')
-    recommendation_mode_enum.drop(op.get_bind(), checkfirst=True)
+    # Drop enum type via raw SQL
+    op.execute("DROP TYPE IF EXISTS recommendationmode")

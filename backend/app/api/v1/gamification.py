@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_current_user, get_db_session
+from app.api.deps import get_current_user, get_db
 from app.core.domain.gamification import ACHIEVEMENTS
 from app.core.services.gamification import GamificationService
 from app.infra.db.repositories.gamification import (
@@ -37,7 +37,7 @@ def _get_gamification_service(session) -> GamificationService:
 
 @router.get("/progress", response_model=GamificationProgressResponse)
 async def get_progress(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Get current user's gamification progress including streak and achievements."""
@@ -72,7 +72,7 @@ async def get_progress(
 
 @router.get("/achievements", response_model=AllAchievementsResponse)
 async def get_all_achievements(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Get all available achievements with earned status."""
@@ -101,7 +101,7 @@ async def get_all_achievements(
 
 @router.get("/streak", response_model=UserStreakResponse)
 async def get_streak(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Get current user's streak data."""

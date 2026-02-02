@@ -193,10 +193,10 @@ async def _submit_via_playwright(
     from app.infra.db.repositories.profile import SQLProfileRepository
     from app.infra.db.repositories.resume import SQLResumeRepository
     from app.infra.db.session import async_session_factory
-    from app.infra.storage.s3 import S3FileStorage
+    from app.infra.storage.s3 import S3Storage
 
     settings = get_settings()
-    storage = S3FileStorage(
+    storage = S3Storage(
         endpoint=settings.s3_endpoint,
         access_key=settings.s3_access_key.get_secret_value(),
         secret_key=settings.s3_secret_key.get_secret_value(),

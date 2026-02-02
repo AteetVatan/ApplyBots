@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'b4c6d8e0f3g4'
@@ -19,12 +20,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add stage column to applications and create application_notes table."""
-    # Create ApplicationStage enum type
-    application_stage_enum = sa.Enum(
+    # Create ApplicationStage enum type via raw SQL
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE applicationstage AS ENUM (
+                'saved', 'applied', 'interviewing', 'offer', 'rejected'
+            );
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+
+    # Reference existing enum type
+    application_stage_enum = postgresql.ENUM(
         'saved', 'applied', 'interviewing', 'offer', 'rejected',
-        name='applicationstage'
+        name='applicationstage',
+        create_type=False
     )
-    application_stage_enum.create(op.get_bind(), checkfirst=True)
 
     # Add stage and stage_updated_at columns to applications
     op.add_column(
@@ -76,6 +88,5 @@ def downgrade() -> None:
     op.drop_column('applications', 'stage_updated_at')
     op.drop_column('applications', 'stage')
 
-    # Drop enum type
-    application_stage_enum = sa.Enum(name='applicationstage')
-    application_stage_enum.drop(op.get_bind(), checkfirst=True)
+    # Drop enum type via raw SQL
+    op.execute("DROP TYPE IF EXISTS applicationstage")

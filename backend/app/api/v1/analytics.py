@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import get_current_user, get_db_session
+from app.api.deps import get_current_user, get_db
 from app.core.services.analytics import AnalyticsService
 from app.infra.db.repositories.application import SQLApplicationRepository
 from app.infra.db.repositories.job import SQLJobRepository
@@ -36,7 +36,7 @@ def _get_analytics_service(session) -> AnalyticsService:
 
 @router.get("/funnel", response_model=ApplicationFunnelResponse)
 async def get_funnel(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
 ):
@@ -57,7 +57,7 @@ async def get_funnel(
 
 @router.get("/trends", response_model=TrendDataResponse)
 async def get_trends(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
     days: int = Query(30, ge=1, le=90, description="Number of days of history"),
 ):
@@ -75,7 +75,7 @@ async def get_trends(
 
 @router.get("/advanced", response_model=AdvancedAnalyticsResponse)
 async def get_advanced_analytics(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
     days: int = Query(90, ge=1, le=365, description="Number of days to analyze"),
 ):
@@ -139,7 +139,7 @@ async def get_advanced_analytics(
 
 @router.get("/heatmap", response_model=HeatmapResponse)
 async def get_heatmap(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
     days: int = Query(90, ge=1, le=365, description="Number of days to analyze"),
 ):
@@ -165,7 +165,7 @@ async def get_heatmap(
 
 @router.get("/predictions", response_model=PredictiveInsightsResponse)
 async def get_predictions(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Get predictive insights for job search."""

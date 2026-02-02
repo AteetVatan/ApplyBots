@@ -108,6 +108,15 @@ class CustomSection:
     items: list[str] = field(default_factory=list)
 
 
+@dataclass
+class CustomLink:
+    """Custom link for contact section."""
+
+    id: str
+    label: str
+    url: str
+
+
 # Default section order for resume builder
 DEFAULT_SECTION_ORDER: list[str] = [
     "contact",
@@ -138,6 +147,8 @@ class ResumeContent:
     linkedin_url: str | None = None
     portfolio_url: str | None = None
     github_url: str | None = None
+    profile_picture_url: str | None = None
+    custom_links: list[CustomLink] = field(default_factory=list)
 
     # Professional Summary
     professional_summary: str | None = None

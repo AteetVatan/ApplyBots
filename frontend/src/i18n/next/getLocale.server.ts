@@ -1,3 +1,5 @@
+import "server-only";
+
 /**
  * Server-side locale detection for Next.js.
  *
@@ -17,12 +19,55 @@ import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE_NAME,
   validateLocale,
-  parseAcceptLanguage,
+  isValidLocale,
 } from "../config";
 
 // ---------------------------------------------------------------------------
 // Server-Side Locale Detection
 // ---------------------------------------------------------------------------
+
+/**
+ * Parses the Accept-Language header and returns the best matching locale.
+ * 
+ * This is a server-only function moved from config.ts to break the
+ * shared dependency chain between client and server code.
+ *
+ * @param acceptLanguage - The Accept-Language header value
+ * @returns The best matching supported locale or undefined
+ */
+function parseAcceptLanguage(
+  acceptLanguage: string | null | undefined
+): Locale | undefined {
+  if (!acceptLanguage) {
+    return undefined;
+  }
+
+  // Parse language tags with quality values
+  // e.g., "en-US,en;q=0.9,de;q=0.8" -> [{ lang: "en-US", q: 1 }, ...]
+  const languages = acceptLanguage
+    .split(",")
+    .map((part) => {
+      const [lang, qPart] = part.trim().split(";");
+      const q = qPart ? parseFloat(qPart.replace("q=", "")) : 1;
+      return { lang: lang.trim().toLowerCase(), q };
+    })
+    .sort((a, b) => b.q - a.q);
+
+  // Find first matching supported locale
+  for (const { lang } of languages) {
+    // Try exact match first (e.g., "en" matches "en")
+    if (isValidLocale(lang)) {
+      return lang;
+    }
+    // Try base language (e.g., "en-US" -> "en")
+    const baseLang = lang.split("-")[0];
+    if (isValidLocale(baseLang)) {
+      return baseLang;
+    }
+  }
+
+  return undefined;
+}
 
 /**
  * Detects the current locale from server context.

@@ -2,63 +2,545 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+ * CSS Custom Properties - Modern Design System
+ * ============================================================================ */
+
 :root {
+  /* Background colors */
   --background: #0f172a;
+  --background-subtle: #1e293b;
   --foreground: #f8fafc;
+  
+  /* Card colors */
   --card: #1e293b;
   --card-foreground: #f8fafc;
-  --primary: #3370ff;
+  --card-hover: #334155;
+  
+  /* Primary brand color */
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
   --primary-foreground: #ffffff;
+  --primary-glow: rgba(59, 130, 246, 0.4);
+  
+  /* Secondary colors */
   --secondary: #334155;
   --secondary-foreground: #f8fafc;
+  
+  /* Muted/subtle text */
   --muted: #475569;
   --muted-foreground: #94a3b8;
-  --accent: #fe4311;
+  
+  /* Accent/highlight */
+  --accent: #8b5cf6;
+  --accent-hover: #7c3aed;
   --accent-foreground: #ffffff;
+  --accent-glow: rgba(139, 92, 246, 0.4);
+  
+  /* Success/warning/error */
+  --success: #22c55e;
+  --success-foreground: #ffffff;
+  --warning: #eab308;
+  --warning-foreground: #0f172a;
+  --error: #ef4444;
+  --error-foreground: #ffffff;
+  
+  /* Border and input */
   --border: #334155;
-  --input: #334155;
-  --ring: #3370ff;
+  --border-subtle: #1e293b;
+  --input: #1e293b;
+  --input-border: #475569;
+  --ring: #3b82f6;
+  
+  /* Resume builder specific */
+  --resume-primary: var(--primary);
+  --resume-sidebar: #1e293b;
+  --resume-preview-bg: #f1f5f9;
+  
+  /* Animation durations */
+  --animation-fast: 150ms;
+  --animation-normal: 300ms;
+  --animation-slow: 500ms;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-glow: 0 0 30px var(--primary-glow);
+  
+  /* Border radius */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-full: 9999px;
 }
+
+/* Light mode overrides */
+@media (prefers-color-scheme: light) {
+  :root {
+    --background: #f8fafc;
+    --background-subtle: #f1f5f9;
+    --foreground: #0f172a;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --card-hover: #f1f5f9;
+    --muted: #e2e8f0;
+    --muted-foreground: #64748b;
+    --border: #e2e8f0;
+    --border-subtle: #f1f5f9;
+    --input: #ffffff;
+    --input-border: #cbd5e1;
+    --resume-preview-bg: #e2e8f0;
+  }
+}
+
+/* ============================================================================
+ * Base Styles
+ * ============================================================================ */
 
 @layer base {
   body {
     @apply bg-neutral-950 text-neutral-50 antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1, h2, h3, h4, h5, h6 {
     @apply font-display tracking-tight;
   }
+  
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  /* Focus ring styles */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-900;
+  }
+  
+  /* Selection styles */
+  ::selection {
+    @apply bg-blue-500/30 text-white;
+  }
 }
+
+/* ============================================================================
+ * Component Styles
+ * ============================================================================ */
 
 @layer components {
+  /* Glass card with backdrop blur */
   .glass-card {
     @apply bg-neutral-900/50 backdrop-blur-xl border border-neutral-800/50 rounded-2xl;
+    box-shadow: 
+      0 4px 30px rgba(0, 0, 0, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
 
+  /* Gradient text effect */
   .gradient-text {
-    @apply bg-gradient-to-r from-primary-400 via-primary-500 to-accent-500 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent;
+  }
+  
+  /* Gradient text - primary variant */
+  .gradient-text-primary {
+    @apply bg-gradient-to-r from-blue-500 to-cyan-400 bg-clip-text text-transparent;
+  }
+  
+  /* Gradient text - accent variant */
+  .gradient-text-accent {
+    @apply bg-gradient-to-r from-purple-500 to-pink-500 bg-clip-text text-transparent;
   }
 
+  /* Glow effect */
   .glow {
-    @apply shadow-[0_0_30px_rgba(51,112,255,0.3)];
+    box-shadow: 0 0 30px var(--primary-glow);
+  }
+  
+  .glow-accent {
+    box-shadow: 0 0 30px var(--accent-glow);
+  }
+  
+  /* Animated gradient border */
+  .gradient-border {
+    @apply relative;
+  }
+  
+  .gradient-border::before {
+    content: "";
+    @apply absolute inset-0 rounded-xl;
+    padding: 1px;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+  
+  /* Button styles */
+  .btn-primary {
+    @apply px-4 py-2 bg-blue-500 text-white rounded-lg font-medium
+           hover:bg-blue-600 active:bg-blue-700
+           transition-all duration-200
+           shadow-md hover:shadow-lg
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply px-4 py-2 bg-gray-700 text-white rounded-lg font-medium
+           hover:bg-gray-600 active:bg-gray-800
+           transition-all duration-200
+           border border-gray-600
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-ghost {
+    @apply px-4 py-2 text-gray-300 rounded-lg font-medium
+           hover:bg-gray-800 hover:text-white
+           transition-colors duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-gradient {
+    @apply px-4 py-2 text-white rounded-lg font-medium
+           bg-gradient-to-r from-blue-500 to-purple-600
+           hover:from-blue-600 hover:to-purple-700
+           transition-all duration-200
+           shadow-lg hover:shadow-xl;
+  }
+  
+  /* Input styles */
+  .input-modern {
+    @apply w-full px-4 py-2.5 rounded-lg
+           bg-gray-800 border border-gray-700
+           text-white placeholder-gray-500
+           focus:border-blue-500 focus:ring-1 focus:ring-blue-500
+           transition-colors duration-200;
+  }
+  
+  /* Card with hover effect */
+  .card-hover {
+    @apply bg-gray-900 border border-gray-800 rounded-xl
+           transition-all duration-300
+           hover:border-gray-700 hover:shadow-lg hover:-translate-y-0.5;
+  }
+  
+  /* Shimmer loading effect */
+  .shimmer {
+    @apply relative overflow-hidden;
+  }
+  
+  .shimmer::after {
+    content: "";
+    @apply absolute inset-0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.1) 50%,
+      transparent 100%
+    );
+    animation: shimmer 2s infinite;
+  }
+  
+  /* Prose for rich text content */
+  .prose-resume {
+    @apply text-gray-700;
+  }
+  
+  .prose-resume h1, .prose-resume h2, .prose-resume h3 {
+    @apply text-gray-900 font-bold;
+  }
+  
+  .prose-resume p {
+    @apply mb-2;
+  }
+  
+  .prose-resume ul {
+    @apply list-disc pl-4 space-y-1;
+  }
+  
+  .prose-resume a {
+    @apply text-blue-600 hover:underline;
   }
 }
+
+/* ============================================================================
+ * Utility Classes
+ * ============================================================================ */
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
   }
 
+  /* Animation delays */
+  .animation-delay-100 {
+    animation-delay: 100ms;
+  }
+  
   .animation-delay-200 {
     animation-delay: 200ms;
+  }
+  
+  .animation-delay-300 {
+    animation-delay: 300ms;
   }
 
   .animation-delay-400 {
     animation-delay: 400ms;
   }
+  
+  .animation-delay-500 {
+    animation-delay: 500ms;
+  }
 
   .animation-delay-600 {
     animation-delay: 600ms;
   }
+  
+  /* Fill mode for animations */
+  .animation-fill-both {
+    animation-fill-mode: both;
+  }
+  
+  /* Scrollbar styling */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--muted) transparent;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--muted);
+    border-radius: 3px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+  }
+  
+  /* Hide scrollbar */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Subtle background patterns */
+  .pattern-dots {
+    background-image: radial-gradient(circle, var(--muted) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+  
+  .pattern-grid {
+    background-image: 
+      linear-gradient(to right, var(--border-subtle) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--border-subtle) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+}
+
+/* ============================================================================
+ * Keyframe Animations
+ * ============================================================================ */
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px var(--primary-glow);
+  }
+  50% {
+    box-shadow: 0 0 40px var(--primary-glow);
+  }
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Animation utility classes */
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out;
+}
+
+.animate-fade-in-down {
+  animation: fade-in-down 0.4s ease-out;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.4s ease-out;
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.4s ease-out;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
+/* ============================================================================
+ * Dark Mode Specific Styles
+ * ============================================================================ */
+
+.dark {
+  color-scheme: dark;
+}
+
+/* ============================================================================
+ * Print Styles
+ * ============================================================================ */
+
+@media print {
+  body {
+    @apply bg-white text-black;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+  
+  .glass-card {
+    @apply bg-white border-gray-300;
+    backdrop-filter: none;
+  }
+}
+
+/* ============================================================================
+ * Tiptap Editor Styles
+ * ============================================================================ */
+
+.ProseMirror {
+  @apply outline-none;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  @apply text-gray-400 pointer-events-none float-left h-0;
+  content: attr(data-placeholder);
+}
+
+.ProseMirror ul,
+.ProseMirror ol {
+  @apply pl-4;
+}
+
+.ProseMirror ul {
+  @apply list-disc;
+}
+
+.ProseMirror ol {
+  @apply list-decimal;
+}
+
+.ProseMirror li {
+  @apply my-1;
+}
+
+.ProseMirror a {
+  @apply text-blue-500 underline;
 }

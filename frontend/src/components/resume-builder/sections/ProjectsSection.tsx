@@ -4,9 +4,14 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { useResumeBuilderStore, type Project } from "@/stores/resume-builder-store";
-import { Plus, Trash2, ChevronDown, ChevronUp, FolderGit2, X, Link } from "lucide-react";
+import { Plus, Trash2, ChevronDown, ChevronUp, FolderGit2, X, Link, Loader2 } from "lucide-react";
+
+// Lazy load RichTextEditor to avoid SSR issues with Tiptap
+const RichTextEditor = lazy(() =>
+  import("../RichTextEditor").then((mod) => ({ default: mod.RichTextEditor }))
+);
 
 interface ProjectCardProps {
   project: Project;
@@ -89,13 +94,20 @@ function ProjectCard({ project, isExpanded, onToggle }: ProjectCardProps) {
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Description *
             </label>
-            <textarea
-              value={project.description}
-              onChange={(e) => updateProject(project.id, { description: e.target.value })}
-              placeholder="Built a full-stack e-commerce platform with shopping cart, payment integration, and admin dashboard..."
-              rows={3}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-            />
+            <Suspense
+              fallback={
+                <div className="h-32 flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800">
+                  <Loader2 className="h-5 w-5 text-gray-400 animate-spin" />
+                </div>
+              }
+            >
+              <RichTextEditor
+                content={project.description || ""}
+                onChange={(html) => updateProject(project.id, { description: html })}
+                placeholder="Built a full-stack e-commerce platform with shopping cart, payment integration, and admin dashboard..."
+                minHeight="120px"
+              />
+            </Suspense>
           </div>
 
           {/* Project URL */}

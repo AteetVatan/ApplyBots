@@ -13,12 +13,14 @@ import {
   User,
   CreditCard,
   Sparkles,
+  PenLine,
 } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/dashboard/jobs", icon: Briefcase, label: "Jobs" },
   { href: "/dashboard/applications", icon: FileText, label: "Applications" },
+  { href: "/dashboard/resumes", icon: PenLine, label: "Resumes" },
   { href: "/dashboard/chat", icon: MessageSquare, label: "AI Chat" },
   { href: "/dashboard/tools", icon: Sparkles, label: "AI Tools" },
   { href: "/dashboard/profile", icon: User, label: "Profile" },

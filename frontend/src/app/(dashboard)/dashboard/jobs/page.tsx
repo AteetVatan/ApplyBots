@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useJobs } from "@/hooks/useJobs";
 import { useCreateApplication } from "@/hooks/useApplications";
 import { formatSalary, formatRelativeTime, getMatchScoreColor } from "@/lib/utils";
-import { MapPin, Briefcase, DollarSign, Clock, Plus, Loader2, RefreshCw } from "lucide-react";
+import { MapPin, Briefcase, DollarSign, Clock, Plus, Loader2, RefreshCw, Sparkles, ClipboardPaste } from "lucide-react";
 import { api } from "@/lib/api";
 
 export default function JobsPage() {
@@ -50,6 +51,13 @@ export default function JobsPage() {
           {refreshError && (
             <span className="text-sm text-error-500">{refreshError}</span>
           )}
+          <Link
+            href="/dashboard/jobs/custom/expert-apply"
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-primary-600 hover:from-purple-500 hover:to-primary-500 rounded-xl font-medium transition-all"
+          >
+            <ClipboardPaste className="w-4 h-4" />
+            Paste External JD
+          </Link>
           <button
             onClick={handleRefresh}
             disabled={refreshing}
@@ -111,18 +119,27 @@ export default function JobsPage() {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleApply(job.id)}
-                  disabled={createApplication.isPending}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-xl font-medium transition-colors disabled:opacity-50"
-                >
-                  {createApplication.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Plus className="w-4 h-4" />
-                  )}
-                  Apply
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleApply(job.id)}
+                    disabled={createApplication.isPending}
+                    className="flex items-center gap-2 px-4 py-2 bg-neutral-700 hover:bg-neutral-600 rounded-xl font-medium transition-colors disabled:opacity-50"
+                  >
+                    {createApplication.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Plus className="w-4 h-4" />
+                    )}
+                    Quick Apply
+                  </button>
+                  <Link
+                    href={`/dashboard/jobs/${job.id}/expert-apply`}
+                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary-600 to-purple-600 hover:from-primary-500 hover:to-purple-500 rounded-xl font-medium transition-all"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Expert Apply
+                  </Link>
+                </div>
               </div>
             </div>
           ))}

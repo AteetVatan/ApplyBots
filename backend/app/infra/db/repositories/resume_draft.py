@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.domain.resume import (
     Award,
     Certification,
+    CustomLink,
     CustomSection,
     Education,
     LanguageProficiency,
@@ -126,6 +127,11 @@ class SQLResumeDraftRepository:
             "linkedin_url": content.linkedin_url,
             "portfolio_url": content.portfolio_url,
             "github_url": content.github_url,
+            "profile_picture_url": content.profile_picture_url,
+            "custom_links": [
+                {"id": cl.id, "label": cl.label, "url": cl.url}
+                for cl in content.custom_links
+            ],
             "professional_summary": content.professional_summary,
             "work_experience": [
                 {
@@ -305,6 +311,16 @@ class SQLResumeDraftRepository:
             for cs in data.get("custom_sections", [])
         ]
 
+        # Parse custom links
+        custom_links = [
+            CustomLink(
+                id=cl.get("id", ""),
+                label=cl.get("label", ""),
+                url=cl.get("url", ""),
+            )
+            for cl in data.get("custom_links", [])
+        ]
+
         return ResumeContent(
             full_name=data.get("full_name", ""),
             email=data.get("email", ""),
@@ -313,6 +329,8 @@ class SQLResumeDraftRepository:
             linkedin_url=data.get("linkedin_url"),
             portfolio_url=data.get("portfolio_url"),
             github_url=data.get("github_url"),
+            profile_picture_url=data.get("profile_picture_url"),
+            custom_links=custom_links,
             professional_summary=data.get("professional_summary"),
             work_experience=work_experience,
             education=education,

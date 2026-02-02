@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_current_user, get_db_session
+from app.api.deps import get_current_user, get_db
 from app.core.services.wellness import WellnessService
 from app.infra.db.repositories.application import SQLApplicationRepository
 from app.schemas.wellness import (
@@ -31,7 +31,7 @@ def _get_wellness_service(session) -> WellnessService:
 
 @router.get("/insight", response_model=WellnessInsightResponse)
 async def get_daily_insight(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Get a personalized daily wellness insight."""
@@ -49,7 +49,7 @@ async def get_daily_insight(
 
 @router.get("/status", response_model=WellnessStatusResponse)
 async def get_wellness_status(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Get comprehensive wellness status."""
@@ -68,7 +68,7 @@ async def get_wellness_status(
 
 @router.get("/burnout-signals", response_model=BurnoutSignalsResponse)
 async def get_burnout_signals(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Detect burnout warning signals."""
@@ -86,7 +86,7 @@ async def get_burnout_signals(
 
 @router.get("/break-reminder", response_model=WellnessInsightResponse)
 async def get_break_reminder(
-    session: Annotated[object, Depends(get_db_session)],
+    session: Annotated[object, Depends(get_db)],
     current_user: Annotated[object, Depends(get_current_user)],
 ):
     """Get a break reminder insight."""

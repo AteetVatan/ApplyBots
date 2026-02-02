@@ -1,3 +1,5 @@
+import "server-only";
+
 /**
  * Server-side translator for Next.js server components.
  *
@@ -6,7 +8,7 @@
  *
  * Usage in server components:
  * ```tsx
- * import { getT } from "@/i18n";
+ * import { getT } from "@/i18n/server";
  *
  * export default async function Page() {
  *   const t = await getT();
@@ -17,7 +19,7 @@
 
 import type { Locale, TranslatorFn } from "../core/types";
 import { createTranslator } from "../core/createTranslator";
-import { getLocale } from "./getLocale";
+import { getLocale } from "./getLocale.server";
 
 // ---------------------------------------------------------------------------
 // Server Translator

@@ -150,7 +150,7 @@ async def refresh_token(
         )
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def logout(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
     db: DBSession,
@@ -179,7 +179,7 @@ async def logout(
         logger.warning("logout_failed", error=str(e))  # Logout should not fail
 
 
-@router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def logout_all(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
     db: DBSession,

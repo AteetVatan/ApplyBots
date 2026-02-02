@@ -24,6 +24,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.domain.alert import AlertType
 from app.core.domain.application import ApplicationStage, ApplicationStatus
 from app.core.domain.campaign import CampaignStatus, RecommendationMode
+from app.core.domain.career_kit import CareerKitPhase
 from app.core.domain.job import JobSource, RemoteType
 from app.core.domain.subscription import Plan, SubscriptionStatus
 from app.core.domain.user import UserRole
@@ -66,6 +67,7 @@ class UserModel(Base):
         back_populates="user", uselist=False
     )
     achievements: Mapped[List["UserAchievementModel"]] = relationship(back_populates="user")
+    career_kit_sessions: Mapped[List["CareerKitSessionModel"]] = relationship(back_populates="user")
 
 
 class ProfileModel(Base):
@@ -126,7 +128,8 @@ class JobModel(Base):
     salary_currency: Mapped[str] = mapped_column(String(3), default="USD")
     remote: Mapped[bool] = mapped_column(Boolean, default=False)
     remote_type: Mapped[RemoteType] = mapped_column(
-        Enum(RemoteType), default=RemoteType.ONSITE
+        Enum(RemoteType, values_callable=lambda x: [e.value for e in x]),
+        default=RemoteType.ONSITE,
     )
     remote_score: Mapped[int] = mapped_column(Integer, default=0)
     timezone_requirements: Mapped[list] = mapped_column(JSON, default=list)
@@ -149,10 +152,12 @@ class ApplicationModel(Base):
     job_id: Mapped[str] = mapped_column(String(36), ForeignKey("jobs.id"))
     resume_id: Mapped[str] = mapped_column(String(36), ForeignKey("resumes.id"))
     status: Mapped[ApplicationStatus] = mapped_column(
-        Enum(ApplicationStatus), default=ApplicationStatus.PENDING_REVIEW
+        Enum(ApplicationStatus, values_callable=lambda x: [e.value for e in x]),
+        default=ApplicationStatus.PENDING_REVIEW,
     )
     stage: Mapped[ApplicationStage] = mapped_column(
-        Enum(ApplicationStage), default=ApplicationStage.SAVED
+        Enum(ApplicationStage, values_callable=lambda x: [e.value for e in x]),
+        default=ApplicationStage.SAVED,
     )
     match_score: Mapped[int] = mapped_column(Integer, default=0)
     match_explanation: Mapped[Optional[dict]] = mapped_column(JSON)
@@ -481,3 +486,64 @@ class UserAchievementModel(Base):
 
     # Relationships
     user: Mapped["UserModel"] = relationship(back_populates="achievements")
+
+
+# =============================================================================
+# CareerKit Models
+# =============================================================================
+
+
+class CareerKitSessionModel(Base):
+    """CareerKit Expert Apply session.
+
+    Stores the state of an Expert Apply workflow including:
+    - Job source (database job or custom pasted JD)
+    - Resume source (uploaded resume or builder draft)
+    - Analysis results (requirements, gaps, questionnaire)
+    - Generated outputs (tailored CV, interview prep)
+    """
+
+    __tablename__ = "career_kit_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_cuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    job_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("jobs.id", ondelete="SET NULL"), index=True
+    )
+    custom_jd: Mapped[Optional[dict]] = mapped_column(JSON)
+    session_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_custom_job: Mapped[bool] = mapped_column(Boolean, default=False)
+    phase: Mapped[CareerKitPhase] = mapped_column(
+        Enum(CareerKitPhase, values_callable=lambda x: [e.value for e in x]),
+        default=CareerKitPhase.ANALYZE,
+    )
+
+    # Resume source
+    resume_source_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    resume_source_id: Mapped[str] = mapped_column(String(36), nullable=False)
+
+    # Analysis data (Phase 1)
+    requirements: Mapped[Optional[dict]] = mapped_column(JSON)
+    selected_bullets: Mapped[Optional[dict]] = mapped_column(JSON)
+    gap_map: Mapped[Optional[dict]] = mapped_column(JSON)
+    questionnaire: Mapped[Optional[dict]] = mapped_column(JSON)
+    answers: Mapped[Optional[dict]] = mapped_column(JSON)
+
+    # Generation data (Phase 2)
+    delta_instructions: Mapped[Optional[dict]] = mapped_column(JSON)
+    generated_cv_draft_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("resume_drafts.id", ondelete="SET NULL")
+    )
+    interview_prep: Mapped[Optional[dict]] = mapped_column(JSON)
+
+    # Debug/audit
+    pipeline_messages: Mapped[Optional[dict]] = mapped_column(JSON)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=datetime.utcnow)
+
+    # Relationships
+    user: Mapped["UserModel"] = relationship(back_populates="career_kit_sessions")
+    job: Mapped[Optional["JobModel"]] = relationship()
+    generated_cv_draft: Mapped[Optional["ResumeDraftModel"]] = relationship()

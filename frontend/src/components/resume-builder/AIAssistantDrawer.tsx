@@ -49,7 +49,8 @@ export function AIAssistantDrawer() {
 
       switch (activeMode) {
         case "summary": {
-          const mockSummary = `Results-driven ${content.workExperience[0]?.title || "professional"} with ${content.workExperience.length}+ years of experience in delivering high-impact solutions. Proven track record of ${content.skills.technical.slice(0, 3).join(", ") || "technical excellence"} with a focus on driving business outcomes.`;
+          const allTechnicalSkills = content.skills.technical.flatMap((g) => g.items);
+          const mockSummary = `Results-driven ${content.workExperience[0]?.title || "professional"} with ${content.workExperience.length}+ years of experience in delivering high-impact solutions. Proven track record of ${allTechnicalSkills.slice(0, 3).join(", ") || "technical excellence"} with a focus on driving business outcomes.`;
           setGeneratedSummary(mockSummary);
           break;
         }
@@ -90,8 +91,25 @@ export function AIAssistantDrawer() {
 
   const handleApplySkills = () => {
     if (suggestedSkills.technical.length > 0) {
+      // Get existing technical skills items
+      const existingTechnicalItems = content.skills.technical.flatMap((g) => g.items);
+      const newTechnicalItems = [...new Set([...existingTechnicalItems, ...suggestedSkills.technical])];
+      
+      // If there's an existing technical skills group, add to it; otherwise create a new one
+      const updatedTechnical = content.skills.technical.length > 0
+        ? content.skills.technical.map((g, i) => 
+            i === 0 
+              ? { ...g, items: [...new Set([...g.items, ...suggestedSkills.technical])] }
+              : g
+          )
+        : [{
+            id: crypto.randomUUID(),
+            header: "Technical Skills",
+            items: suggestedSkills.technical,
+          }];
+      
       updateSkills({
-        technical: [...new Set([...content.skills.technical, ...suggestedSkills.technical])],
+        technical: updatedTechnical,
         soft: [...new Set([...content.skills.soft, ...suggestedSkills.soft])],
         tools: [...new Set([...content.skills.tools, ...suggestedSkills.tools])],
       });
@@ -102,10 +120,10 @@ export function AIAssistantDrawer() {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="fixed inset-0 z-[100] flex justify-end">
       <div className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
 
-      <div className="relative w-full max-w-md bg-white dark:bg-gray-900 shadow-xl flex flex-col">
+      <div className="relative w-full max-w-md bg-white dark:bg-gray-900 shadow-xl flex flex-col h-full">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">

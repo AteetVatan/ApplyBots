@@ -10,10 +10,16 @@ This guide provides detailed instructions for setting up, installing, and debugg
 2. [Quick Start with Docker](#quick-start-with-docker)
 3. [Backend Setup](#backend-setup)
 4. [Frontend Setup](#frontend-setup)
-5. [Environment Configuration](#environment-configuration)
-6. [Running the Application](#running-the-application)
-7. [Debugging](#debugging)
-8. [Common Issues & Solutions](#common-issues--solutions)
+5. [OAuth Setup](#oauth-setup-optional)
+6. [Environment Configuration](#environment-configuration)
+7. [Running the Application](#running-the-application)
+8. [Debugging](#debugging)
+9. [Common Issues & Solutions](#common-issues--solutions)
+10. [Testing](#testing)
+11. [Code Quality](#code-quality)
+12. [API Endpoints Reference](#api-endpoints-reference)
+13. [Features Overview](#features-overview)
+14. [Next Steps](#next-steps)
 
 ---
 
@@ -150,6 +156,55 @@ tesseract --version
 
 > **Note:** When using Docker, Tesseract is automatically installed in the container. This step is only needed for local development.
 
+#### 2c. Install Poppler (Required for PDF Image Extraction)
+
+Poppler is required by `pdf2image` to convert PDF pages to images for OCR and AI Vision extraction. Without it, the OCR and Vision AI fallbacks won't work.
+
+**Windows:**
+```powershell
+# Option 1: Using Chocolatey (recommended)
+choco install poppler
+```
+
+**Option 2: Manual Installation (Windows)**
+
+1. **Download** from: https://github.com/osser/poppler-windows/releases
+2. **Extract** to: `C:\Program Files\poppler`
+3. **Add to system PATH:**
+   - Press `Win + R` → type `sysdm.cpl` → Enter
+   - Click **Advanced** tab → **Environment Variables**
+   - Under **System variables**, find and select **Path** → **Edit**
+   - Click **New** → add `C:\Program Files\poppler\Library\bin`
+   - Click **OK** on all dialogs
+4. **Restart your terminal/IDE** (important!)
+
+```powershell
+# Verify installation (after restart)
+pdfinfo -v
+# or
+pdftoppm -v
+```
+
+**macOS:**
+```bash
+# Using Homebrew
+brew install poppler
+
+# Verify installation
+pdfinfo -v
+```
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt-get update
+sudo apt-get install -y poppler-utils
+
+# Verify installation
+pdfinfo -v
+```
+
+> **Note:** After installing Poppler on Windows, you must restart your terminal/IDE for the PATH changes to take effect.
+
 #### 3. Configure Environment
 
 ```bash
@@ -183,14 +238,16 @@ TOGETHER_API_KEY=your-api-key
 
 ```env
 # OAuth (for social login)
-GOOGLE_OAUTH_CLIENT_ID=your-google-client-id
-GOOGLE_OAUTH_CLIENT_SECRET=your-google-client-secret
-GITHUB_OAUTH_CLIENT_ID=your-github-client-id
-GITHUB_OAUTH_CLIENT_SECRET=your-github-client-secret
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/callback/google
+GITHUB_CLIENT_ID=your-github-client-id
+GITHUB_CLIENT_SECRET=your-github-client-secret
+GITHUB_REDIRECT_URI=http://localhost:3000/api/auth/callback/github
 
 # Email notifications
 SENDGRID_API_KEY=your-sendgrid-api-key
-SENDGRID_SENDER_EMAIL=noreply@applybots.io
+SENDGRID_FROM_EMAIL=noreply@applybots.com
 
 # Rate limiting
 RATE_LIMIT_REQUESTS=100
@@ -220,11 +277,12 @@ docker run -d --name ApplyBots-postgres `
 # Run migrations (REQUIRED before seeding)
 cd backend
 
+# Apply migrations to create database tables
+alembic upgrade head
+
 # Create initial migration (only needed once, if migrations/versions is empty)
 alembic revision --autogenerate -m "Initial migration"
 
-# Apply migrations to create database tables
-alembic upgrade head
 cd ..
 
 # (Optional) Seed sample jobs (only after migrations are complete)
@@ -404,8 +462,8 @@ curl http://localhost:8080/health
 # Should return: {"status":"healthy","version":"0.1.0"}
 
 # MinIO health check
-curl http://localhost:9000/minio/health/live
-# Should return: healthy
+curl -I http://localhost:9000/minio/health/live
+# Should return: HTTP/1.1 200 OK (empty body indicates healthy)
 
 # Redis health check
 docker exec ApplyBots-redis redis-cli ping
@@ -434,6 +492,8 @@ docker exec ApplyBots-postgres pg_isready -U postgres
 
 ## Frontend Setup
 
+> **Note:** The frontend uses **Next.js 16+** with the App Router, Server Components by default, and TypeScript strict mode.
+
 ### Option A: Docker (Recommended)
 
 Frontend starts automatically with `make dev`.
@@ -449,11 +509,21 @@ npm install
 
 #### 2. Configure Environment
 
-Create `.env.local`:
+Create `.env.local` in the `frontend` directory:
 
 ```env
+# =============================================================================
+# Frontend Environment Configuration
+# =============================================================================
+
+# Backend API URL - the frontend proxies API requests to this URL
 NEXT_PUBLIC_API_URL=http://localhost:8080
 ```
+
+> **Architecture Note:** The frontend includes an API proxy at `src/app/api/v1/[...path]/route.ts` that forwards all `/api/v1/*` requests to the backend. This handles:
+> - Proper Authorization header forwarding
+> - CORS compliance
+> - OAuth callback routing
 
 #### 3. Start Development Server
 
@@ -465,6 +535,19 @@ cd ..
 make frontend
 ```
 
+#### 4. Available Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Start development server |
+| `npm run build` | Build for production |
+| `npm run start` | Start production server |
+| `npm run lint` | Run ESLint |
+| `npm run typecheck` | Run TypeScript type checking |
+| `npm run test` | Run Vitest tests |
+| `npm run test:ui` | Run Vitest with UI |
+| `npm run test:e2e` | Run Playwright E2E tests |
+
 ### Verify Frontend is Running
 
 Open http://localhost:3000 in your browser.
@@ -475,6 +558,8 @@ Open http://localhost:3000 in your browser.
 
 To enable Google and GitHub login:
 
+> **Architecture Note:** The OAuth flow uses the frontend as the callback endpoint. The frontend's API proxy (`/api/v1/[...path]`) forwards OAuth callbacks to the backend for token exchange. This ensures proper cookie handling and CORS compliance.
+
 ### Google OAuth
 
 1. Go to [Google Cloud Console](https://console.developers.google.com/)
@@ -482,8 +567,13 @@ To enable Google and GitHub login:
 3. Navigate to **APIs & Services > Credentials**
 4. Click **Create Credentials > OAuth client ID**
 5. Select **Web application**
-6. Add authorized redirect URI: `http://localhost:8080/api/v1/auth/google-callback`
-7. Copy the Client ID and Client Secret to your `.env` file
+6. Add authorized redirect URI: `http://localhost:3000/api/auth/callback/google`
+7. Copy the Client ID and Client Secret to your `.env` file:
+   ```env
+   GOOGLE_CLIENT_ID=<your-client-id>
+   GOOGLE_CLIENT_SECRET=<your-client-secret>
+   GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/callback/google
+   ```
 
 ### GitHub OAuth
 
@@ -492,9 +582,39 @@ To enable Google and GitHub login:
 3. Fill in the details:
    - **Application name**: ApplyBots (Local)
    - **Homepage URL**: `http://localhost:3000`
-   - **Authorization callback URL**: `http://localhost:8080/api/v1/auth/github-callback`
+   - **Authorization callback URL**: `http://localhost:3000/api/auth/callback/github`
 4. Copy the Client ID and generate a Client Secret
-5. Add both to your `.env` file
+5. Add both to your `.env` file:
+   ```env
+   GITHUB_CLIENT_ID=<your-client-id>
+   GITHUB_CLIENT_SECRET=<your-client-secret>
+   GITHUB_REDIRECT_URI=http://localhost:3000/api/auth/callback/github
+   ```
+
+### OAuth Flow Diagram
+
+```
+User clicks "Login with Google/GitHub"
+         │
+         ▼
+Frontend redirects to provider
+         │
+         ▼
+User authenticates with provider
+         │
+         ▼
+Provider redirects to frontend callback URL
+(e.g., http://localhost:3000/api/auth/callback/google)
+         │
+         ▼
+Frontend API proxy forwards to backend
+         │
+         ▼
+Backend exchanges code for tokens & creates session
+         │
+         ▼
+User is logged in
+```
 
 ---
 
@@ -537,12 +657,14 @@ REFRESH_TOKEN_EXPIRE_DAYS=7
 # OAuth (Optional - for Google/GitHub login)
 # =============================================================================
 # Google OAuth: https://console.developers.google.com/
-GOOGLE_OAUTH_CLIENT_ID=<your-google-client-id>
-GOOGLE_OAUTH_CLIENT_SECRET=<your-google-client-secret>
+GOOGLE_CLIENT_ID=<your-google-client-id>
+GOOGLE_CLIENT_SECRET=<your-google-client-secret>
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/callback/google
 
 # GitHub OAuth: https://github.com/settings/developers
-GITHUB_OAUTH_CLIENT_ID=<your-github-client-id>
-GITHUB_OAUTH_CLIENT_SECRET=<your-github-client-secret>
+GITHUB_CLIENT_ID=<your-github-client-id>
+GITHUB_CLIENT_SECRET=<your-github-client-secret>
+GITHUB_REDIRECT_URI=http://localhost:3000/api/auth/callback/github
 
 # =============================================================================
 # Together AI
@@ -579,13 +701,52 @@ CHROMA_PORT=8000
 # =============================================================================
 # Get API key from https://sendgrid.com/
 SENDGRID_API_KEY=<your-sendgrid-api-key>
-SENDGRID_SENDER_EMAIL=noreply@applybots.io
+SENDGRID_FROM_EMAIL=noreply@applybots.com
 
 # =============================================================================
 # Rate Limiting
 # =============================================================================
 RATE_LIMIT_REQUESTS=100
 RATE_LIMIT_WINDOW_SECONDS=60
+
+# =============================================================================
+# Plan Limits (Daily application limits per subscription tier)
+# =============================================================================
+DAILY_APPLY_LIMIT_FREE=5
+DAILY_APPLY_LIMIT_PREMIUM=20
+DAILY_APPLY_LIMIT_ELITE=50
+
+# =============================================================================
+# Job Aggregator APIs (Optional - for job ingestion)
+# =============================================================================
+# Adzuna - Get keys from: https://developer.adzuna.com/
+ADZUNA_APP_ID=<your-adzuna-app-id>
+ADZUNA_API_KEY=<your-adzuna-api-key>
+
+# Jooble - Get key from: https://jooble.org/api/about
+JOOBLE_API_KEY=<your-jooble-api-key>
+
+# The Muse - Get key from: https://www.themuse.com/developers
+THEMUSE_API_KEY=<your-themuse-api-key>
+
+# =============================================================================
+# Company Intelligence APIs (Optional)
+# =============================================================================
+# NewsAPI - Get key from: https://newsapi.org/
+NEWSAPI_KEY=<your-newsapi-key>
+
+# =============================================================================
+# Feature Flags (Enable/disable features)
+# =============================================================================
+FEATURE_COMPANY_INTEL=true
+FEATURE_GAMIFICATION=true
+FEATURE_WELLNESS=true
+FEATURE_ADVANCED_ANALYTICS=true
+
+# =============================================================================
+# Alert Settings
+# =============================================================================
+ALERT_DREAM_JOB_DEFAULT_THRESHOLD=90
 ```
 
 ---
@@ -615,10 +776,73 @@ make dev-rebuild
 | Backend API | `make backend` | 8080 |
 | Frontend | `make frontend` | 3000 |
 | Celery Worker | `make worker` | - |
+| Celery Worker (Windows) | `make worker-windows` | - |
 | Celery Beat | `make worker-beat` | - |
 | MinIO | `docker start ApplyBots-minio` | 9000, 9001 |
 | PostgreSQL | `docker start ApplyBots-postgres` | 5432 |
 | Redis | `docker start ApplyBots-redis` | 6379 |
+
+### All Available Makefile Commands
+
+Run `make help` to see all available commands. Key commands:
+
+**Development:**
+| Command | Description |
+|---------|-------------|
+| `make dev` | Start full development environment (Docker) |
+| `make dev-up` | Start Docker services |
+| `make dev-down` | Stop Docker services |
+| `make dev-logs` | View Docker logs |
+| `make dev-rebuild` | Rebuild and restart services |
+
+**Individual Services:**
+| Command | Description |
+|---------|-------------|
+| `make backend` | Run backend locally |
+| `make frontend` | Run frontend locally |
+| `make worker` | Run Celery worker (auto-detects Windows) |
+| `make worker-windows` | Run Celery worker with explicit solo pool |
+| `make worker-beat` | Run Celery beat scheduler |
+
+**Database:**
+| Command | Description |
+|---------|-------------|
+| `make migrate` | Run database migrations |
+| `make migrate-new MSG="desc"` | Create new migration |
+| `make migrate-down` | Rollback last migration |
+| `make db-shell` | Open database shell |
+| `make seed-jobs` | Seed database with sample jobs |
+
+**Testing:**
+| Command | Description |
+|---------|-------------|
+| `make test` | Run all backend tests |
+| `make test-unit` | Run unit tests only |
+| `make test-integration` | Run integration tests only |
+| `make test-cov` | Run tests with coverage |
+| `make test-frontend` | Run frontend tests |
+| `make test-e2e` | Run E2E tests (Playwright) |
+
+**Code Quality:**
+| Command | Description |
+|---------|-------------|
+| `make lint` | Run linters (backend + frontend) |
+| `make format` | Format backend code |
+| `make typecheck` | Run type checking |
+
+**Dependencies:**
+| Command | Description |
+|---------|-------------|
+| `make install` | Install all dependencies |
+| `make install-backend` | Install backend dependencies only |
+| `make install-frontend` | Install frontend dependencies only |
+
+**Utilities:**
+| Command | Description |
+|---------|-------------|
+| `make clean` | Clean generated files |
+| `make shell` | Open Python shell with app context |
+| `make build` | Build production images |
 
 ---
 
@@ -1005,6 +1229,90 @@ tesseract --version
 # Should output version info like: tesseract 5.x.x
 ```
 
+#### 9. PDF Extraction: "Unable to get page count. Is poppler installed?"
+
+```
+ocr_extraction_failed          error=Unable to get page count. Is poppler installed and in PATH?
+vision_ocr_extraction_failed   error=Unable to get page count. Is poppler installed and in PATH?
+```
+
+**Cause:** Poppler is not installed. The `pdf2image` library requires Poppler to convert PDFs to images for OCR and AI Vision extraction.
+
+**Solution:**
+
+1. **Install Poppler:**
+   ```bash
+   # Windows (Chocolatey)
+   choco install poppler
+   
+   # macOS
+   brew install poppler
+   
+   # Linux
+   sudo apt-get install poppler-utils
+   ```
+   
+   **Windows Manual Installation:**
+   - Download from: https://github.com/osser/poppler-windows/releases
+   - Extract to: `C:\Program Files\poppler`
+   - Add to PATH: `C:\Program Files\poppler\Library\bin`
+     - Press `Win + R` → type `sysdm.cpl` → Enter
+     - Click **Advanced** tab → **Environment Variables**
+     - Under **System variables**, find **Path** → **Edit**
+     - Click **New** → add `C:\Program Files\poppler\Library\bin`
+     - Click **OK** on all dialogs
+
+2. **Restart your terminal/IDE** after installation for PATH changes to take effect (important!).
+
+3. **Verify installation:**
+   ```bash
+   pdfinfo -v
+   # or
+   pdftoppm -v
+   ```
+
+#### 10. PDF Extraction: "No /Root object! - Is this really a PDF?"
+
+```
+pypdf_extraction_failed        error='/Root'
+pdfplumber_extraction_failed   error=No /Root object! - Is this really a PDF?
+pdfminer_extraction_failed     error=No /Root object! - Is this really a PDF?
+```
+
+**Cause:** The PDF file is corrupted or malformed. All PDF parsing libraries require a valid PDF structure with a `/Root` object.
+
+**Solutions:**
+
+1. **Re-export the PDF** from the original source:
+   - If created in Word: File → Save As → PDF
+   - If created in Google Docs: File → Download → PDF Document
+   - If created in Canva/other tools: Re-export as PDF
+
+2. **Use a PDF repair tool:**
+   - Adobe Acrobat: File → Save As Other → Optimized PDF
+   - Online tools: [iLovePDF](https://www.ilovepdf.com/repair-pdf), [PDF2Go](https://www.pdf2go.com/repair-pdf)
+   - Ghostscript: `gs -o repaired.pdf -sDEVICE=pdfwrite -dPDFSETTINGS=/prepress corrupted.pdf`
+
+3. **Create a clean copy via browser:**
+   - Open the PDF in Chrome or Edge
+   - Press Ctrl+P (or Cmd+P on Mac)
+   - Select "Save as PDF" as the destination
+   - Save the new PDF and upload it
+
+4. **Try PyMuPDF (AGPL license)** - More tolerant of malformed PDFs:
+   ```bash
+   pip install pymupdf
+   ```
+   > **Note:** PyMuPDF uses AGPL-3.0 license which requires open-sourcing derivative works. Only use if you're okay with AGPL or for testing purposes.
+
+5. **Upload as DOCX instead** - If you have the original Word document, upload that instead of PDF.
+
+**Why this happens:**
+- PDF was created with non-standard or buggy tools
+- File was corrupted during download or transfer
+- PDF uses unusual encoding or non-compliant structure
+- Some resume builders create non-standard PDFs
+
 ### Frontend Issues
 
 #### 1. Module Not Found
@@ -1144,12 +1452,102 @@ make typecheck
 
 ---
 
+## API Endpoints Reference
+
+All API endpoints are prefixed with `/api/v1`. Interactive documentation is available at http://localhost:8080/docs when `DEBUG=true`.
+
+### Core Endpoints
+
+| Endpoint Group | Path | Description |
+|----------------|------|-------------|
+| **Auth** | `/auth/*` | Signup, login, logout, token refresh, OAuth |
+| **Profile** | `/profile/*` | User profile management |
+| **Jobs** | `/jobs/*` | Job listings, search, match scores |
+| **Applications** | `/applications/*` | Application tracking, stages (Kanban), notes |
+| **Resumes** | `/resumes/*` | Resume upload, parsing, management |
+| **Resume Builder** | `/resume-builder/*` | AI-powered resume creation |
+| **Campaigns** | `/campaigns/*` | Automated application campaigns |
+| **Agents** | `/agents/*` | AI agent interactions |
+| **Billing** | `/billing/*` | Usage tracking, subscription management |
+
+### Feature Endpoints
+
+| Endpoint Group | Path | Description |
+|----------------|------|-------------|
+| **Career Tools** | `/tools/*` | Interview roleplay, negotiation, career advice |
+| **Alerts** | `/alerts/*` | Job alerts, dream job notifications |
+| **Gamification** | `/gamification/*` | Points, streaks, achievements |
+| **Analytics** | `/analytics/*` | Application analytics, insights |
+| **Wellness** | `/wellness/*` | Job search wellness tracking |
+| **Company Intel** | `/company-intel/*` | Company research, news, insights |
+
+### Health Check
+
+```bash
+curl http://localhost:8080/health
+# Returns: {"status":"healthy","version":"0.1.0"}
+```
+
+---
+
 ## Getting Help
 
 1. **Check the logs** - Most issues are visible in logs
 2. **API Docs** - http://localhost:8080/docs has interactive testing
 3. **Search issues** - Check existing GitHub issues
 4. **Ask for help** - Create a new issue with logs and reproduction steps
+
+---
+
+## Features Overview
+
+### Career Tools
+
+ApplyBots includes AI-powered career tools accessible via `/api/v1/tools/*`:
+
+#### Interview Roleplay (`/tools/interview/*`)
+Practice mock interviews with AI-generated questions tailored to your target role:
+- Start a session with target role, company, and interview type (behavioral, technical, situational, mixed)
+- Receive personalized questions based on experience level
+- Get real-time feedback on your answers with strengths, improvements, and example answers
+- End session to get overall performance summary and recommendations
+
+#### Offer Negotiation (`/tools/negotiation/*`)
+Analyze job offers and get negotiation strategies:
+- Compare offers against market data
+- Identify strengths and concerns in an offer
+- Get recommended counter-offer amounts with justification
+- Receive ready-to-use negotiation scripts (email, phone)
+
+#### Career Advisor (`/tools/career/*`)
+Get personalized career guidance:
+- Assess current career position and skills
+- Identify transferable skills and market position
+- Explore recommended career paths with transition steps
+- Get learning roadmap with prioritized resources
+
+### Job Aggregators
+
+ApplyBots can ingest jobs from multiple sources (configure API keys to enable):
+
+| Source | Environment Variables | Notes |
+|--------|----------------------|-------|
+| Adzuna | `ADZUNA_APP_ID`, `ADZUNA_API_KEY` | Global job board |
+| Jooble | `JOOBLE_API_KEY` | Aggregated listings |
+| The Muse | `THEMUSE_API_KEY` | Tech/startup focus |
+| StackOverflow | (scraper) | Developer jobs |
+| WellFound | (scraper) | Startup jobs |
+
+### Feature Flags
+
+Toggle features on/off via environment variables:
+
+| Feature | Variable | Description |
+|---------|----------|-------------|
+| Company Intel | `FEATURE_COMPANY_INTEL` | Company research & news |
+| Gamification | `FEATURE_GAMIFICATION` | Points, streaks, achievements |
+| Wellness | `FEATURE_WELLNESS` | Job search wellness tracking |
+| Advanced Analytics | `FEATURE_ADVANCED_ANALYTICS` | Detailed application analytics |
 
 ---
 
@@ -1165,6 +1563,7 @@ After setup is complete:
 4. **Browse jobs** to see match scores based on your resume
 5. **Try the AI chat** to interact with agents for job searching and applications
 6. **Create applications** - AI generates cover letters and answers screening questions
+7. **Use Career Tools** - Practice interviews, analyze offers, and plan your career path
 
 ### Quick Service Status Check
 

@@ -6,7 +6,8 @@
 
 import { useState } from "react";
 import { useResumeBuilderStore } from "@/stores/resume-builder-store";
-import { Plus, X, Sparkles, Code, Wrench, Users } from "lucide-react";
+import { Plus, X, Sparkles, Code, Trash2 } from "lucide-react";
+import type { TechnicalSkillGroup } from "@/stores/resume-builder-store";
 
 interface SkillTagInputProps {
   skills: string[];
@@ -76,16 +77,81 @@ function SkillTagInput({ skills, onChange, placeholder }: SkillTagInputProps) {
   );
 }
 
+interface TechnicalSkillGroupEditorProps {
+  group: TechnicalSkillGroup;
+  onChange: (group: TechnicalSkillGroup) => void;
+  onRemove: () => void;
+}
+
+function TechnicalSkillGroupEditor({ group, onChange, onRemove }: TechnicalSkillGroupEditorProps) {
+  const handleHeaderChange = (header: string) => {
+    onChange({ ...group, header });
+  };
+
+  const handleItemsChange = (items: string[]) => {
+    onChange({ ...group, items });
+  };
+
+  return (
+    <div className="border border-gray-300 dark:border-gray-600 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50">
+      <div className="flex items-center justify-between mb-2">
+        <input
+          type="text"
+          value={group.header}
+          onChange={(e) => handleHeaderChange(e.target.value)}
+          placeholder="Category name (e.g., Programming Languages, Frameworks...)"
+          className="flex-1 font-semibold text-gray-900 dark:text-white bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-blue-500 text-sm"
+        />
+        <button
+          onClick={onRemove}
+          className="ml-2 p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+          title="Remove category"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+      <SkillTagInput
+        skills={group.items}
+        onChange={handleItemsChange}
+        placeholder="Add skill to this category..."
+      />
+    </div>
+  );
+}
+
 export function SkillsSection() {
   const skills = useResumeBuilderStore((s) => s.content.skills);
   const updateSkills = useResumeBuilderStore((s) => s.updateSkills);
   const setAIDrawerOpen = useResumeBuilderStore((s) => s.setAIDrawerOpen);
 
+  const handleAddTechnicalGroup = () => {
+    const newGroup: TechnicalSkillGroup = {
+      id: crypto.randomUUID(),
+      header: "New Category",
+      items: [],
+    };
+    updateSkills({ ...skills, technical: [...skills.technical, newGroup] });
+  };
+
+  const handleUpdateTechnicalGroup = (id: string, updatedGroup: TechnicalSkillGroup) => {
+    updateSkills({
+      ...skills,
+      technical: skills.technical.map((g) => (g.id === id ? updatedGroup : g)),
+    });
+  };
+
+  const handleRemoveTechnicalGroup = (id: string) => {
+    updateSkills({
+      ...skills,
+      technical: skills.technical.filter((g) => g.id !== id),
+    });
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          Skills
+          Technical Skills
         </h3>
         <button
           onClick={() => setAIDrawerOpen(true)}
@@ -96,43 +162,44 @@ export function SkillsSection() {
         </button>
       </div>
 
-      {/* Technical Skills */}
       <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          <Code className="h-4 w-4 text-blue-500" />
-          Technical Skills
-        </label>
-        <SkillTagInput
-          skills={skills.technical}
-          onChange={(technical) => updateSkills({ ...skills, technical })}
-          placeholder="Add technical skill (e.g., Python, React, AWS...)"
-        />
-      </div>
-
-      {/* Tools & Technologies */}
-      <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          <Wrench className="h-4 w-4 text-emerald-500" />
-          Tools & Technologies
-        </label>
-        <SkillTagInput
-          skills={skills.tools}
-          onChange={(tools) => updateSkills({ ...skills, tools })}
-          placeholder="Add tool (e.g., Git, Docker, Figma...)"
-        />
-      </div>
-
-      {/* Soft Skills */}
-      <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          <Users className="h-4 w-4 text-purple-500" />
-          Soft Skills
-        </label>
-        <SkillTagInput
-          skills={skills.soft}
-          onChange={(soft) => updateSkills({ ...skills, soft })}
-          placeholder="Add soft skill (e.g., Leadership, Communication...)"
-        />
+        <div className="flex items-center justify-between mb-2">
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+            <Code className="h-4 w-4 text-blue-500" />
+            Categories
+          </label>
+          <button
+            onClick={handleAddTechnicalGroup}
+            className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+          >
+            <Plus className="h-3 w-3" />
+            Add Category
+          </button>
+        </div>
+        <div className="space-y-3">
+          {skills.technical.length === 0 && (
+            <div className="text-sm text-gray-500 dark:text-gray-400 text-center py-4 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+              No technical skill categories yet. Click "Add Category" to get started.
+            </div>
+          )}
+          {skills.technical.map((group) => (
+            <TechnicalSkillGroupEditor
+              key={group.id}
+              group={group}
+              onChange={(updated) => handleUpdateTechnicalGroup(group.id, updated)}
+              onRemove={() => handleRemoveTechnicalGroup(group.id)}
+            />
+          ))}
+          {skills.technical.length > 0 && (
+            <button
+              onClick={handleAddTechnicalGroup}
+              className="w-full flex items-center justify-center gap-1 px-3 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors border border-dashed border-blue-300 dark:border-blue-700"
+            >
+              <Plus className="h-4 w-4" />
+              Add Category
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tips */}
@@ -143,8 +210,8 @@ export function SkillsSection() {
         <ul className="text-xs text-amber-700 dark:text-amber-400 space-y-1">
           <li>• Match skills to keywords in the job description</li>
           <li>• List your most relevant skills first</li>
-          <li>• Include both hard and soft skills</li>
           <li>• Use industry-standard terminology</li>
+          <li>• Group technical skills by category (e.g., Languages, Frameworks, Databases)</li>
         </ul>
       </div>
     </div>

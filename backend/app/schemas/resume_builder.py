@@ -96,6 +96,14 @@ class CustomSectionSchema(BaseModel):
     items: list[str] = Field(default_factory=list)
 
 
+class CustomLinkSchema(BaseModel):
+    """Custom link schema."""
+
+    id: str
+    label: str
+    url: str
+
+
 # ============================================================================
 # Resume Content Schema
 # ============================================================================
@@ -112,6 +120,8 @@ class ResumeContentSchema(BaseModel):
     linkedin_url: str | None = None
     portfolio_url: str | None = None
     github_url: str | None = None
+    profile_picture_url: str | None = None
+    custom_links: list[CustomLinkSchema] = Field(default_factory=list)
 
     # Professional Summary
     professional_summary: str | None = None
@@ -272,24 +282,6 @@ class ATSScoreResponse(BaseModel):
 
 
 # ============================================================================
-# PDF Export Schemas
-# ============================================================================
-
-
-class ExportPDFRequest(BaseModel):
-    """Request to export PDF."""
-
-    template_id: str = "professional-modern"
-
-
-class ExportPDFResponse(BaseModel):
-    """PDF export response."""
-
-    url: str
-    filename: str
-
-
-# ============================================================================
 # Template Schemas
 # ============================================================================
 
@@ -307,3 +299,15 @@ class TemplateListResponse(BaseModel):
     """List of templates response."""
 
     templates: list[TemplateSchema]
+
+
+# ============================================================================
+# Profile Picture Schemas
+# ============================================================================
+
+
+class ProfilePictureResponse(BaseModel):
+    """Response after uploading a profile picture."""
+
+    url: str
+    filename: str

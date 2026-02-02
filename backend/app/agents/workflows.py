@@ -198,6 +198,23 @@ class JobApplicationWorkflow:
 
         self._session_id = session_id or str(uuid.uuid4())
 
+        # Early check: If resume-related request but no resume uploaded
+        if self._requires_resume(message) and not await self._has_resume():
+            return AgentResponse(
+                content=(
+                    "I'd love to help with your resume, but you haven't uploaded one yet!\n\n"
+                    "Please go to the **Profile** tab and upload your resume first. "
+                    "Once uploaded, I can:\n"
+                    "- Analyze your skills and experience\n"
+                    "- Match you with relevant jobs\n"
+                    "- Suggest improvements for specific positions\n\n"
+                    "Head to Profile → Resume section to get started!"
+                ),
+                session_id=self._session_id,
+                agents_involved=["Orchestrator"],
+                actions_taken=["resume_check", "upload_required"],
+            )
+
         # Initialize agents if not done
         if not self._agents:
             self._setup_agents()
@@ -390,6 +407,23 @@ Ensure all responses are based on the user's actual resume data."""
         import uuid
 
         self._session_id = str(uuid.uuid4())
+
+        # Early check: If resume-related request but no resume uploaded
+        if self._requires_resume(message) and not await self._has_resume():
+            yield StreamResponse(
+                agent_name="Orchestrator",
+                content=(
+                    "I'd love to help with your resume, but you haven't uploaded one yet!\n\n"
+                    "Please go to the **Profile** tab and upload your resume first. "
+                    "Once uploaded, I can:\n"
+                    "- Analyze your skills and experience\n"
+                    "- Match you with relevant jobs\n"
+                    "- Suggest improvements for specific positions\n\n"
+                    "Head to Profile → Resume section to get started!"
+                ),
+                is_final=True,
+            )
+            return
 
         # Initialize agents
         if not self._agents:
@@ -595,6 +629,35 @@ Remember: Only suggest highlighting skills/experience that exist in the resume."
             return "apply"
         else:
             return "general"
+
+    def _requires_resume(self, message: str) -> bool:
+        """Check if message requires a resume to be uploaded.
+
+        Used for early validation before agent setup.
+        """
+        message_lower = message.lower()
+        resume_keywords = ["resume", "cv", "optimize", "tailor", "improve my"]
+        action_keywords = ["analyze", "review", "check", "score", "match"]
+
+        has_resume_keyword = any(kw in message_lower for kw in resume_keywords)
+        has_action_keyword = any(kw in message_lower for kw in action_keywords)
+
+        return has_resume_keyword or (has_action_keyword and "resume" in message_lower)
+
+    async def _has_resume(self) -> bool:
+        """Check if user has uploaded a resume with parsed data."""
+        from app.infra.db.repositories.resume import SQLResumeRepository
+
+        resume_repo = SQLResumeRepository(session=self._db)
+
+        # Check primary resume first
+        resume = await resume_repo.get_primary(user_id=self._user_id)
+        if resume and resume.parsed_data:
+            return True
+
+        # Fall back to any resume with parsed data
+        resumes = await resume_repo.get_by_user_id(self._user_id)
+        return any(r.parsed_data for r in resumes)
 
     async def _handle_job_search(self, message: str) -> AgentResponse:
         """Handle job search queries."""

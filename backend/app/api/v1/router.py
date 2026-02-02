@@ -14,6 +14,7 @@ from app.api.v1 import (
     auth,
     billing,
     campaigns,
+    career_kit,
     company_intel,
     gamification,
     jobs,
@@ -36,6 +37,7 @@ api_router.include_router(billing.router, prefix="/billing", tags=["billing"])
 api_router.include_router(resumes.router, prefix="/resumes", tags=["resumes"])
 api_router.include_router(resume_builder.router, prefix="/resume-builder", tags=["resume-builder"])
 api_router.include_router(tools.router, prefix="/tools", tags=["career-tools"])
+api_router.include_router(career_kit.router, prefix="/career-kit", tags=["career-kit"])
 api_router.include_router(alerts.router)
 api_router.include_router(gamification.router)
 api_router.include_router(analytics.router)

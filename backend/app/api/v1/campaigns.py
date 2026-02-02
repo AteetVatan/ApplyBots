@@ -248,7 +248,7 @@ async def update_campaign(
     return _campaign_to_response(updated)
 
 
-@router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_campaign(
     campaign_id: str,
     current_user: CurrentUser,
@@ -428,6 +428,7 @@ async def get_campaign_jobs(
 @router.post(
     "/{campaign_id}/jobs/{job_id}/reject",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
 )
 async def reject_campaign_job(
     campaign_id: str,
