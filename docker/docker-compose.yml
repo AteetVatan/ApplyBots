@@ -127,6 +127,28 @@ services:
       - /app/.next
     command: npm run dev
 
+  reactive-resume:
+    build:
+      context: ../reactive-resume
+      dockerfile: Dockerfile
+    container_name: ApplyBots-reactive-resume
+    ports:
+      - "3002:3002"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8080
+      - NEXT_PUBLIC_IFRAME_PARENT_ORIGIN=http://localhost:3000
+    depends_on:
+      - backend
+    volumes:
+      - ../reactive-resume:/app
+      - /app/node_modules
+    command: pnpm dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   postgres_data:
   redis_data:
