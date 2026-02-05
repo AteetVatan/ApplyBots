@@ -3,10 +3,21 @@ import type z from "zod";
 import { pageDimensionsAsMillimeters } from "@/schema/page";
 import type { resumeDataSchema } from "@/schema/resume/data";
 
-type UseCssVariablesProps = Pick<z.infer<typeof resumeDataSchema>, "picture" | "metadata">;
+type UseCssVariablesProps = Pick<z.infer<typeof resumeDataSchema>, "picture" | "metadata"> | undefined;
 
-export const useCSSVariables = ({ picture, metadata }: UseCssVariablesProps) => {
+export const useCSSVariables = (props: UseCssVariablesProps) => {
 	const fontWeightStyles = useMemo(() => {
+		// Return defaults when props are undefined (loading state)
+		if (!props?.metadata?.typography) {
+			return {
+				lowestBodyFontWeight: 400,
+				lowestHeadingFontWeight: 400,
+				highestBodyFontWeight: 700,
+				highestHeadingFontWeight: 700,
+			};
+		}
+		
+		const { metadata } = props;
 		const lowestBodyFontWeight = Math.min(...metadata.typography.body.fontWeights.map(Number));
 		const lowestHeadingFontWeight = Math.min(...metadata.typography.heading.fontWeights.map(Number));
 
@@ -14,7 +25,14 @@ export const useCSSVariables = ({ picture, metadata }: UseCssVariablesProps) => 
 		const highestHeadingFontWeight = Math.max(...metadata.typography.heading.fontWeights.map(Number));
 
 		return { lowestBodyFontWeight, lowestHeadingFontWeight, highestBodyFontWeight, highestHeadingFontWeight };
-	}, [metadata.typography.body.fontWeights, metadata.typography.heading.fontWeights]);
+	}, [props?.metadata?.typography?.body?.fontWeights, props?.metadata?.typography?.heading?.fontWeights]);
+
+	// Return empty styles when props are undefined (loading state)
+	if (!props?.picture || !props?.metadata) {
+		return {} as React.CSSProperties;
+	}
+	
+	const { picture, metadata } = props;
 
 	return {
 		"--picture-border-radius": `${picture.borderRadius}pt`,

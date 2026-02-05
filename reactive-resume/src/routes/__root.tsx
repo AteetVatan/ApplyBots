@@ -14,9 +14,11 @@ import { Toaster } from "@/components/ui/sonner";
 import { DialogManager } from "@/dialogs/manager";
 import { ConfirmDialogProvider } from "@/hooks/use-confirm";
 import { PromptDialogProvider } from "@/hooks/use-prompt";
-import { getSession } from "@/integrations/auth/functions";
-import type { AuthSession } from "@/integrations/auth/types";
 import { client, type orpc } from "@/integrations/orpc/client";
+import { UserProvider } from "@/contexts/user-context";
+import { getPostMessageClient } from "@/lib/postmessage-client";
+import { signalAuthReady } from "@/hooks/use-auth-ready";
+import { useEffect } from "react";
 import type { FeatureFlags } from "@/integrations/orpc/services/flags";
 import { getLocale, isRTL, type Locale, loadLocale } from "@/utils/locale";
 import { getTheme, type Theme } from "@/utils/theme";
@@ -27,15 +29,14 @@ type RouterContext = {
 	locale: Locale;
 	orpc: typeof orpc;
 	queryClient: QueryClient;
-	session: AuthSession | null;
 	flags: FeatureFlags;
 };
 
 const appName = "Reactive Resume";
-const tagline = "A free and open-source resume builder";
+const tagline = "Resume builder";
 const title = `${appName} — ${tagline}`;
 const description =
-	"Reactive Resume is a free and open-source resume builder that simplifies the process of creating, updating, and sharing your resume.";
+	"Resume builder that simplifies the process of creating, updating, and sharing your resume.";
 
 await loadLocale(await getLocale());
 
@@ -86,9 +87,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 		};
 	},
 	beforeLoad: async () => {
-		// Initialize API client and postMessage client
+		// Initialize API client, storage client, and postMessage client
 		if (typeof window !== "undefined") {
 			const { initAPIClient } = await import("@/lib/api-client");
+			const { initStorageClient } = await import("@/lib/storage-client");
 			const { initPostMessageClient } = await import("@/lib/postmessage-client");
 			
 			const baseURL = import.meta.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -96,19 +98,19 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 				return localStorage.getItem("ApplyBots_access_token") || null;
 			};
 			initAPIClient(baseURL, getAuthToken);
+			initStorageClient(baseURL, getAuthToken);
 			
 			const parentOrigin = import.meta.env.NEXT_PUBLIC_IFRAME_PARENT_ORIGIN || "http://localhost:3000";
 			initPostMessageClient(parentOrigin);
 		}
 
-		const [theme, locale, session, flags] = await Promise.all([
+		const [theme, locale, flags] = await Promise.all([
 			getTheme(),
 			getLocale(),
-			getSession().catch(() => null), // Allow auth to fail - we use JWT
 			client.flags.get().catch(() => ({})), // Allow flags to fail
 		]);
 
-		return { theme, locale, session, flags };
+		return { theme, locale, flags };
 	},
 });
 
@@ -119,6 +121,33 @@ type Props = {
 function RootDocument({ children }: Props) {
 	const { theme, locale } = Route.useRouteContext();
 	const dir = isRTL(locale) ? "rtl" : "ltr";
+
+	// Setup global postMessage handlers in component (not in beforeLoad)
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+
+		const postMessageClient = getPostMessageClient();
+
+		// Handle set-auth-token (moved from builder route)
+		const unsubscribeSetAuthToken = postMessageClient.on("set-auth-token", (message) => {
+			const setAuthTokenMessage = message as { type: "set-auth-token"; payload: { token: string } };
+			if (setAuthTokenMessage.payload?.token) {
+				localStorage.setItem("ApplyBots_access_token", setAuthTokenMessage.payload.token);
+				// Update API client with new token getter
+				import("@/lib/api-client").then(({ setAuthTokenGetter }) => {
+					setAuthTokenGetter(() => setAuthTokenMessage.payload.token);
+				});
+				// Signal that auth is ready for API calls
+				signalAuthReady();
+				// Send acknowledgment to parent that token was received
+				postMessageClient.send({ type: "auth-token-received" });
+			}
+		});
+
+		return () => {
+			unsubscribeSetAuthToken();
+		};
+	}, []);
 
 	return (
 		<html suppressHydrationWarning dir={dir} lang={locale} className={theme}>
@@ -131,17 +160,19 @@ function RootDocument({ children }: Props) {
 					<I18nProvider i18n={i18n}>
 						<IconContext.Provider value={{ size: 16, weight: "regular" }}>
 							<ThemeProvider theme={theme}>
-								<ConfirmDialogProvider>
-									<PromptDialogProvider>
-										{children}
+								<UserProvider>
+									<ConfirmDialogProvider>
+										<PromptDialogProvider>
+											{children}
 
-										<DialogManager />
-										<CommandPalette />
-										<Toaster richColors position="bottom-right" />
+											<DialogManager />
+											<CommandPalette />
+											<Toaster richColors position="bottom-right" />
 
-										{import.meta.env.DEV && <BreakpointIndicator />}
-									</PromptDialogProvider>
-								</ConfirmDialogProvider>
+											{import.meta.env.DEV && <BreakpointIndicator />}
+										</PromptDialogProvider>
+									</ConfirmDialogProvider>
+								</UserProvider>
 							</ThemeProvider>
 						</IconContext.Provider>
 					</I18nProvider>

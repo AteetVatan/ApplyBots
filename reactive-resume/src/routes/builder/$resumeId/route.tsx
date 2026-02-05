@@ -12,6 +12,7 @@ import { useCSSVariables } from "@/components/resume/hooks/use-css-variables";
 import { useResumeStore } from "@/components/resume/store/resume";
 import { ResizableGroup, ResizablePanel, ResizableSeparator } from "@/components/ui/resizable";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 import { getAPIClient } from "@/lib/api-client";
 import { getPostMessageClient } from "@/lib/postmessage-client";
 import { BuilderHeader } from "./-components/header";
@@ -31,7 +32,7 @@ export const Route = createFileRoute("/builder/$resumeId")({
 		return { layout, name: "Resume" };
 	},
 	head: ({ loaderData }) => ({
-		meta: loaderData ? [{ title: `${loaderData.name} - Reactive Resume` }] : undefined,
+		meta: loaderData ? [{ title: loaderData.name }] : undefined,
 	}),
 });
 
@@ -41,8 +42,12 @@ function RouteComponent() {
 	const { resumeId } = Route.useParams();
 	const apiClient = getAPIClient();
 	const postMessageClient = getPostMessageClient();
+	
+	// Wait for auth token in iframe mode before making API calls
+	const isAuthReady = useAuthReady();
 
 	// Load resume using REST API (skip if resumeId is "new")
+	// Only enable when auth is ready (or for "new" resumes which don't need auth)
 	const { data: resume, isLoading } = useQuery({
 		queryKey: ["resume", resumeId],
 		queryFn: async () => {
@@ -65,7 +70,7 @@ function RouteComponent() {
 			postMessageClient.notifyDraftLoaded(resumeId);
 			return loadedResume;
 		},
-		enabled: !!resumeId,
+		enabled: !!resumeId && (resumeId === "new" || isAuthReady),
 	});
 
 	// Setup postMessage handlers
@@ -82,6 +87,32 @@ function RouteComponent() {
 		const unsubscribeLoadDraft = postMessageClient.on("load-draft", async (message) => {
 			const loadDraftMessage = message as { type: "load-draft"; payload: { draftId: string } };
 			if (loadDraftMessage.payload?.draftId) {
+				// Wait for auth token before loading (check periodically with timeout)
+				const waitForAuth = (): Promise<void> => {
+					return new Promise((resolve) => {
+						const maxWait = 5000;
+						const interval = 100;
+						let waited = 0;
+						
+						const check = () => {
+							if (localStorage.getItem("ApplyBots_access_token")) {
+								resolve();
+								return;
+							}
+							waited += interval;
+							if (waited >= maxWait) {
+								console.warn("load-draft: Auth token not found after timeout, proceeding anyway");
+								resolve();
+								return;
+							}
+							setTimeout(check, interval);
+						};
+						check();
+					});
+				};
+				
+				await waitForAuth();
+				
 				try {
 					const loadedResume = await apiClient.getById(loadDraftMessage.payload.draftId);
 					useResumeStore.getState().initialize(loadedResume);
@@ -93,31 +124,17 @@ function RouteComponent() {
 			}
 		});
 
-		// Handle set-auth-token message
-		const unsubscribeSetAuthToken = postMessageClient.on("set-auth-token", (message) => {
-			const setAuthTokenMessage = message as { type: "set-auth-token"; payload: { token: string } };
-			if (setAuthTokenMessage.payload?.token) {
-				// Store token in localStorage
-				if (typeof window !== "undefined") {
-					localStorage.setItem("ApplyBots_access_token", setAuthTokenMessage.payload.token);
-					// Update API client with new token getter
-					import("@/lib/api-client").then(({ setAuthTokenGetter }) => {
-						setAuthTokenGetter(() => setAuthTokenMessage.payload.token);
-					});
-				}
-			}
-		});
-
 		return () => {
 			unsubscribeGetResume();
 			unsubscribeLoadDraft();
-			unsubscribeSetAuthToken();
 		};
 	}, [postMessageClient, apiClient]);
 
-	const style = resume ? useCSSVariables(resume.data) : {};
 	const isReady = useResumeStore((state) => state.isReady);
 	const initialize = useResumeStore((state) => state.initialize);
+	
+	// Always call useCSSVariables - it now handles undefined data gracefully
+	const style = useCSSVariables(resume?.data);
 
 	useEffect(() => {
 		if (resume) {

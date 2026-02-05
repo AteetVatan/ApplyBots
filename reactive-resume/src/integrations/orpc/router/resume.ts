@@ -269,41 +269,6 @@ export const resumeRouter = {
 			});
 		}),
 
-	setPassword: protectedProcedure
-		.route({
-			method: "POST",
-			path: "/resume/{id}/set-password",
-			tags: ["Resume"],
-			summary: "Set password on a resume",
-			description: "Set a password on a resume to protect it from unauthorized access when shared publicly.",
-		})
-		.input(z.object({ id: z.string(), password: z.string().min(6).max(64) }))
-		.output(z.void())
-		.handler(async ({ context, input }) => {
-			return await resumeService.setPassword({
-				id: input.id,
-				userId: context.user.id,
-				password: input.password,
-			});
-		}),
-
-	removePassword: protectedProcedure
-		.route({
-			method: "POST",
-			path: "/resume/{id}/remove-password",
-			tags: ["Resume"],
-			summary: "Remove password from a resume",
-			description: "Remove password protection from a resume.",
-		})
-		.input(z.object({ id: z.string() }))
-		.output(z.void())
-		.handler(async ({ context, input }) => {
-			return await resumeService.removePassword({
-				id: input.id,
-				userId: context.user.id,
-			});
-		}),
-
 	duplicate: protectedProcedure
 		.route({
 			method: "POST",

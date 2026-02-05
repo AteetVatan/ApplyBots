@@ -10,12 +10,14 @@
 
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ATSScorePanel } from "@/components/resume-builder";
 import { useATSScore } from "@/hooks/useATSScore";
 import { useReactiveResumeIframe } from "@/hooks/useReactiveResumeIframe";
-import type { ResumeContent } from "@/lib/resume-adapter";
+import { useAuth } from "@/providers/AuthProvider";
+import type { ResumeContent as ResumeContentAdapter } from "@/lib/resume-adapter";
+import type { ResumeContent } from "@/stores/resume-builder-store";
 import { resumeContentToApiSchema } from "@/lib/resume-adapter";
 import {
   ChevronLeft,
@@ -23,21 +25,23 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-const REACTIVE_RESUME_URL = process.env.NEXT_PUBLIC_REACTIVE_RESUME_URL || "http://localhost:3001";
+const REACTIVE_RESUME_URL = process.env.NEXT_PUBLIC_REACTIVE_RESUME_URL || "http://localhost:3002";
 
 export default function ResumeBuilderPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { logout } = useAuth();
   const draftIdFromUrl = searchParams.get("draftId");
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const [resumeContent, setResumeContent] = useState<ResumeContent | null>(null);
+  const [resumeContent, setResumeContent] = useState<ResumeContentAdapter | null>(null);
   const [atsScore, setAtsScore] = useState<number | null>(null);
   const [atsBreakdown, setAtsBreakdown] = useState<any>(null);
   const [matchedKeywords, setMatchedKeywords] = useState<string[]>([]);
   const [missingKeywords, setMissingKeywords] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isCalculatingATS, setIsCalculatingATS] = useState(false);
+  const [isDraftLoaded, setIsDraftLoaded] = useState(false);
 
   // Use Reactive Resume iframe hook
   const {
@@ -60,22 +64,90 @@ export default function ResumeBuilderPage() {
         console.error("Error getting resume data after update:", error);
       }
     },
-    onDraftLoaded: (draftId) => {
+    onDraftLoaded: async (draftId) => {
+      // Mark draft as loaded
+      setIsDraftLoaded(true);
+      
       // Update URL if needed
       if (draftId !== draftIdFromUrl) {
         const newUrl = new URL(window.location.href);
         newUrl.searchParams.set("draftId", draftId);
         window.history.replaceState({}, "", newUrl.toString());
       }
+      
+      // Now that draft is loaded, fetch the resume data
+      try {
+        const data = await getResumeData();
+        if (data) {
+          setResumeContent(data);
+        }
+      } catch (error) {
+        console.error("Error loading resume data after draft loaded:", error);
+      }
     },
     onError: (error) => {
       console.error("Iframe error:", error);
     },
+    onAuthRequired: () => {
+      router.push("/login");
+    },
+    onLogout: async () => {
+      await logout();
+    },
   });
+
+  // Convert adapter ResumeContent to store ResumeContent type
+  // IMPORTANT: useMemo is required here to prevent infinite render loops
+  // Without memoization, a new object reference is created on every render,
+  // which causes the useEffect depending on this to trigger repeatedly
+  const normalizedResumeContent: ResumeContent | null = useMemo(() => {
+    if (!resumeContent) return null;
+    return {
+      ...resumeContent,
+      skills: {
+        ...resumeContent.skills,
+        custom: resumeContent.skills.custom || [],
+        customSkillsHeader: resumeContent.skills.customSkillsHeader || "Custom Skills",
+      },
+      projects: resumeContent.projects.map((p) => ({
+        ...p,
+        description: p.description || "",
+      })),
+      awards: resumeContent.awards.map((a) => ({
+        ...a,
+        issuer: a.issuer || "",
+      })),
+      certifications: resumeContent.certifications.map((c) => ({
+        ...c,
+        issuer: c.issuer || "",
+        expiryDate: c.expiryDate ?? null,
+      })),
+      customSections: resumeContent.customSections.map((cs) => ({
+        ...cs,
+        items: cs.items.map((item) =>
+          typeof item === "string" ? item : item.title || ""
+        ),
+      })),
+      languages: resumeContent.languages.map((l) => ({
+        ...l,
+        proficiency: (l.proficiency === "native" ||
+          l.proficiency === "fluent" ||
+          l.proficiency === "conversational" ||
+          l.proficiency === "basic"
+          ? l.proficiency
+          : "conversational") as "native" | "fluent" | "conversational" | "basic",
+      })),
+      sectionOrder: resumeContent.sectionOrder || [],
+      atsScore: resumeContent.atsScore ?? null,
+    };
+  }, [resumeContent]);
+
+  // Empty resume content for when no content is loaded - memoized to prevent reference changes
+  const emptyResumeContent = useMemo(() => ({} as ResumeContent), []);
 
   // ATS scoring hook
   const { result: atsResult, isCalculating, calculate } = useATSScore(
-    resumeContent || ({} as ResumeContent),
+    normalizedResumeContent || emptyResumeContent,
     {
       debounceMs: 800,
       autoCalculate: false, // We'll trigger manually
@@ -95,28 +167,16 @@ export default function ResumeBuilderPage() {
 
   // Calculate ATS score when resume content changes
   useEffect(() => {
-    if (resumeContent && Object.keys(resumeContent).length > 0) {
+    if (normalizedResumeContent && Object.keys(normalizedResumeContent).length > 0) {
       setIsCalculatingATS(true);
       calculate().finally(() => {
         setIsCalculatingATS(false);
       });
     }
-  }, [resumeContent, calculate]);
+  }, [normalizedResumeContent, calculate]);
 
-  // Load resume data when iframe is ready
-  useEffect(() => {
-    if (isIframeReady && draftIdFromUrl) {
-      getResumeData()
-        .then((data) => {
-          if (data) {
-            setResumeContent(data);
-          }
-        })
-        .catch((error) => {
-          console.error("Error loading resume data:", error);
-        });
-    }
-  }, [isIframeReady, draftIdFromUrl, getResumeData]);
+  // NOTE: Resume data is now fetched in onDraftLoaded callback after the draft is loaded.
+  // This ensures we don't try to get resume data before the draft has been loaded into the iframe.
 
   // ATS panel resizable state
   const MIN_ATS_WIDTH = 50;
@@ -172,11 +232,6 @@ export default function ResumeBuilderPage() {
             <ChevronLeft className="h-4 w-4" />
             Back to Resumes
           </button>
-          {draftIdFromUrl && (
-            <span className="text-sm text-muted-foreground">
-              Draft ID: {draftIdFromUrl}
-            </span>
-          )}
         </div>
         <div className="flex items-center gap-2">
           {isIframeLoading && (
@@ -236,6 +291,7 @@ export default function ResumeBuilderPage() {
                 const data = await getResumeData();
                 if (data) {
                   setResumeContent(data);
+                  // Trigger recalculation via the effect that watches normalizedResumeContent
                 }
               } catch (error) {
                 console.error("Error recalculating ATS score:", error);

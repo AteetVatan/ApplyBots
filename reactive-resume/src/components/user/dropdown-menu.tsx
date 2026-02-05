@@ -18,20 +18,19 @@ import {
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { authClient } from "@/integrations/auth/client";
-import type { AuthSession } from "@/integrations/auth/types";
+import { useUserDisplay } from "@/contexts/user-context";
 import { isLocale, loadLocale, localeMap, setLocaleServerFn } from "@/utils/locale";
 import { isTheme } from "@/utils/theme";
 
 type Props = {
-	children: ({ session }: { session: AuthSession }) => React.ReactNode;
+	children: ({ user }: { user: { id: string; name: string; email: string; image?: string } | null }) => React.ReactNode;
 };
 
 export function UserDropdownMenu({ children }: Props) {
 	const router = useRouter();
 	const { i18n } = useLingui();
 	const { theme, setTheme } = useTheme();
-	const { data: session } = authClient.useSession();
+	const { user } = useUserDisplay();
 
 	function handleThemeChange(value: string) {
 		if (!isTheme(value)) return;
@@ -45,26 +44,18 @@ export function UserDropdownMenu({ children }: Props) {
 	}
 
 	function handleLogout() {
-		const toastId = toast.loading(t`Signing out...`);
-
-		authClient.signOut({
-			fetchOptions: {
-				onSuccess: () => {
-					toast.dismiss(toastId);
-					router.invalidate();
-				},
-				onError: ({ error }) => {
-					toast.error(error.message, { id: toastId });
-				},
-			},
-		});
+		localStorage.removeItem("ApplyBots_access_token");
+		if (window.parent !== window) {
+			window.parent.postMessage({ type: "logout" }, "*");
+		}
+		// Don't reload - parent will handle
 	}
 
-	if (!session?.user) return null;
+	if (!user) return null;
 
 	return (
 		<DropdownMenu>
-			<DropdownMenuTrigger asChild>{children({ session })}</DropdownMenuTrigger>
+			<DropdownMenuTrigger asChild>{children({ user })}</DropdownMenuTrigger>
 
 			<DropdownMenuContent align="start" side="top">
 				<DropdownMenuGroup>

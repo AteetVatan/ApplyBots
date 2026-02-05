@@ -1,8 +1,5 @@
 import fs from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { count } from "drizzle-orm";
-import { schema } from "@/integrations/drizzle";
-import { db } from "@/integrations/drizzle/client";
 
 const CACHE_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours
 const GITHUB_API_URL = "https://api.github.com/repos/amruthpillai/reactive-resume";
@@ -60,9 +57,10 @@ const getCachedCount = async (
 	return lastKnown;
 };
 
-const getCountFromDatabase = async (table: typeof schema.user | typeof schema.resume): Promise<number | null> => {
-	const [result] = await db.select({ count: count() }).from(table);
-	return result.count;
+const getCountFromDatabase = async (): Promise<number | null> => {
+	// Database counts not available from FastAPI backend
+	// Return null to use last known values
+	return null;
 };
 
 const getGitHubStars = async (): Promise<number | null> => {
@@ -77,12 +75,12 @@ const getGitHubStars = async (): Promise<number | null> => {
 export const statisticsService = {
 	user: {
 		getCount: () => {
-			return getCachedCount("users", LAST_KNOWN.users, () => getCountFromDatabase(schema.user));
+			return getCachedCount("users", LAST_KNOWN.users, getCountFromDatabase);
 		},
 	},
 	resume: {
 		getCount: () => {
-			return getCachedCount("resumes", LAST_KNOWN.resumes, () => getCountFromDatabase(schema.resume));
+			return getCachedCount("resumes", LAST_KNOWN.resumes, getCountFromDatabase);
 		},
 	},
 	github: {

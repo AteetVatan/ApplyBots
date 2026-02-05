@@ -30,24 +30,8 @@ export const Route = createFileRoute("/$username/$slug")({
 		}
 	},
 	head: ({ loaderData }) => ({
-		meta: [{ title: loaderData ? `${loaderData.resume.name} - Reactive Resume` : "Reactive Resume" }],
+		meta: [{ title: loaderData ? loaderData.resume.name : "" }],
 	}),
-	onError: (error) => {
-		if (error instanceof ORPCError && error.code === "NEED_PASSWORD") {
-			const data = error.data as { username?: string; slug?: string } | undefined;
-			const username = data?.username;
-			const slug = data?.slug;
-
-			if (username && slug) {
-				throw redirect({
-					to: "/auth/resume-password",
-					search: { redirect: `/${username}/${slug}` },
-				});
-			}
-		}
-
-		throw notFound();
-	},
 });
 
 function RouteComponent() {

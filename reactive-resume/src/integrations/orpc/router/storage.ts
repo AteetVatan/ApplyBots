@@ -1,9 +1,8 @@
 import { ORPCError } from "@orpc/server";
 import z from "zod";
 import { protectedProcedure } from "../context";
-import { getStorageService, isImageFile, processImageForUpload, uploadFile } from "../services/storage";
-
-const storageService = getStorageService();
+import { isImageFile, processImageForUpload, uploadFile } from "../services/storage";
+import { getStorageClient } from "@/lib/storage-client";
 
 const fileSchema = z.file().max(10 * 1024 * 1024, "File size must be less than 10MB");
 
@@ -62,8 +61,11 @@ export const storageRouter = {
 				? input.filename
 				: `uploads/${context.user.id}/pictures/${input.filename}`;
 
-			const deleted = await storageService.delete(key);
-
-			if (!deleted) throw new ORPCError("NOT_FOUND");
+			const storageClient = getStorageClient();
+			try {
+				await storageClient.deleteFile(key);
+			} catch (error) {
+				throw new ORPCError("NOT_FOUND");
+			}
 		}),
 };

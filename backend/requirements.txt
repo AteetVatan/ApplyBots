@@ -71,3 +71,4 @@ httpx==0.26.0
 # Development
 ruff==0.1.13
 mypy==1.8.0
+debugpy>=1.8.0  # Python debugger for VS Code/Cursor

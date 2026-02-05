@@ -1,11 +1,11 @@
 import { t } from "@lingui/core/macro";
 import { MoonIcon, SunIcon } from "@phosphor-icons/react";
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "./provider";
 
-export function ThemeToggleButton(props: React.ComponentProps<typeof Button>) {
+function ThemeToggleButtonClient(props: React.ComponentProps<typeof Button>) {
 	const { theme, toggleTheme } = useTheme();
 	const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -62,4 +62,23 @@ export function ThemeToggleButton(props: React.ComponentProps<typeof Button>) {
 			{theme === "dark" ? <MoonIcon aria-hidden="true" /> : <SunIcon aria-hidden="true" />}
 		</Button>
 	);
+}
+
+export function ThemeToggleButton(props: React.ComponentProps<typeof Button>) {
+	const [isClient, setIsClient] = useState(false);
+
+	useEffect(() => {
+		setIsClient(true);
+	}, []);
+
+	// SSR fallback: render a button without theme functionality
+	if (!isClient) {
+		return (
+			<Button size="icon" variant="ghost" aria-label={t`Toggle theme`} {...props}>
+				<SunIcon aria-hidden="true" />
+			</Button>
+		);
+	}
+
+	return <ThemeToggleButtonClient {...props} />;
 }

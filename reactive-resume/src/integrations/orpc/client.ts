@@ -7,6 +7,7 @@ import { createIsomorphicFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import router from "@/integrations/orpc/router";
 import { getLocale } from "@/utils/locale";
+import { getTokenFromStorage } from "@/utils/jwt";
 
 export const getORPCClient = createIsomorphicFn()
 	.server((): RouterClient<typeof router> => {
@@ -31,7 +32,19 @@ export const getORPCClient = createIsomorphicFn()
 		const link = new RPCLink({
 			url: `${window.location.origin}/api/rpc`,
 			fetch: (request, init) => {
-				return fetch(request, { ...init, credentials: "include" });
+				// Add JWT token to Authorization header
+				const token = getTokenFromStorage();
+				const headers = new Headers(init?.headers);
+
+				if (token) {
+					headers.set("Authorization", `Bearer ${token}`);
+				}
+
+				return fetch(request, {
+					...init,
+					headers,
+					credentials: "include",
+				});
 			},
 			// interceptors: [
 			// 	onError((error) => {

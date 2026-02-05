@@ -19,10 +19,6 @@ import {
 } from "@/schema/resume/data";
 
 const dialogTypeSchema = z.discriminatedUnion("type", [
-	z.object({ type: z.literal("auth.change-password"), data: z.undefined() }),
-	z.object({ type: z.literal("auth.two-factor.enable"), data: z.undefined() }),
-	z.object({ type: z.literal("auth.two-factor.disable"), data: z.undefined() }),
-	z.object({ type: z.literal("api-key.create"), data: z.undefined() }),
 	z.object({ type: z.literal("resume.create"), data: z.undefined() }),
 	z.object({
 		type: z.literal("resume.update"),

@@ -50,6 +50,36 @@ interface ErrorMessage extends PostMessage {
 	payload: { message: string };
 }
 
+interface SetUserInfoMessage extends PostMessage {
+	type: "set-user-info";
+	payload: {
+		id: string;
+		name: string;
+		email: string;
+		image?: string;
+	};
+}
+
+interface RequestUserInfoMessage extends PostMessage {
+	type: "request-user-info";
+}
+
+interface AuthRequiredMessage extends PostMessage {
+	type: "auth-required";
+}
+
+interface LogoutMessage extends PostMessage {
+	type: "logout";
+}
+
+interface AuthTokenReceivedMessage extends PostMessage {
+	type: "auth-token-received";
+}
+
+interface RequestTokenRefreshMessage extends PostMessage {
+	type: "request-token-refresh";
+}
+
 // ============================================================================
 // Hook Interface
 // ============================================================================
@@ -60,6 +90,8 @@ interface UseReactiveResumeIframeOptions {
 	onResumeUpdated?: (resumeData: JSONResume) => void;
 	onDraftLoaded?: (draftId: string) => void;
 	onError?: (error: string) => void;
+	onAuthRequired?: () => void;
+	onLogout?: () => void;
 }
 
 interface UseReactiveResumeIframeReturn {
@@ -68,7 +100,7 @@ interface UseReactiveResumeIframeReturn {
 	error: string | null;
 	getResumeData: () => Promise<ResumeContent | null>;
 	loadDraft: (draftId: string) => void;
-	sendAuthToken: () => void;
+	sendAuthToken: (forceImmediate?: boolean) => Promise<void>;
 }
 
 // ============================================================================
@@ -81,11 +113,13 @@ export function useReactiveResumeIframe({
 	onResumeUpdated,
 	onDraftLoaded,
 	onError,
+	onAuthRequired,
+	onLogout,
 }: UseReactiveResumeIframeOptions): UseReactiveResumeIframeReturn {
 	const [isReady, setIsReady] = useState(false);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const { user } = useAuth();
+	const { user, refreshToken } = useAuth();
 	const messageHandlersRef = useRef<Map<string, (message: PostMessage) => void>>(new Map());
 	const resumeDataPromiseRef = useRef<{
 		resolve: (value: ResumeContent | null) => void;
@@ -93,7 +127,7 @@ export function useReactiveResumeIframe({
 	} | null>(null);
 
 	// Get iframe origin from environment
-	const iframeOrigin = process.env.NEXT_PUBLIC_REACTIVE_RESUME_URL || "http://localhost:3001";
+	const iframeOrigin = process.env.NEXT_PUBLIC_REACTIVE_RESUME_URL || "http://localhost:3002";
 
 	/**
 	 * Validate message origin
@@ -190,19 +224,68 @@ export function useReactiveResumeIframe({
 	);
 
 	/**
-	 * Send auth token to iframe
+	 * Check if token is expired
 	 */
-	const sendAuthToken = useCallback(() => {
+	const isTokenExpired = useCallback((token: string): boolean => {
+		try {
+			const parts = token.split(".");
+			if (parts.length !== 3) return true;
+			const payload = JSON.parse(atob(parts[1]));
+			const exp = payload.exp;
+			if (!exp) return false; // No expiration means valid
+			return Date.now() >= exp * 1000;
+		} catch {
+			return true; // If we can't decode, consider expired
+		}
+	}, []);
+
+	/**
+	 * Send auth token to iframe (can be called before isReady for initial setup)
+	 * Checks if token is expired and refreshes it if needed
+	 */
+	const sendAuthToken = useCallback(async (forceImmediate = false) => {
 		if (typeof window === "undefined") return;
 
-		const token = localStorage.getItem("ApplyBots_access_token");
-		if (token && isReady) {
+		let token = localStorage.getItem("ApplyBots_access_token");
+		
+		// Check if token is expired and refresh if needed
+		if (token && isTokenExpired(token)) {
+			console.log("Token expired, refreshing...");
+			try {
+				await refreshToken();
+				token = localStorage.getItem("ApplyBots_access_token");
+			} catch (error) {
+				console.error("Failed to refresh token:", error);
+				// If refresh fails, still try to send the expired token
+				// The iframe will handle the 401 response
+			}
+		}
+		
+		// Allow sending if forceImmediate is true (for iframe-ready handler) or if isReady
+		if (token && (forceImmediate || isReady)) {
 			sendMessage({
 				type: "set-auth-token",
 				payload: { token },
 			});
 		}
-	}, [isReady, sendMessage]);
+	}, [isReady, sendMessage, isTokenExpired, refreshToken]);
+
+	/**
+	 * Send user display info to iframe
+	 */
+	const sendUserInfo = useCallback(() => {
+		if (user && isReady) {
+			sendMessage({
+				type: "set-user-info",
+				payload: {
+					id: user.id,
+					name: user.fullName || "User",
+					email: user.email || "",
+					image: undefined, // Add if available
+				},
+			});
+		}
+	}, [user, isReady, sendMessage]);
 
 	/**
 	 * Setup message listener
@@ -221,12 +304,58 @@ export function useReactiveResumeIframe({
 			// Handle iframe-ready
 			if (message.type === "iframe-ready") {
 				setIsReady(true);
-				// Send auth token when iframe is ready
-				sendAuthToken();
+				// Send auth token immediately when iframe is ready (use forceImmediate=true)
+				sendAuthToken(true);
+				// Send user info when iframe is ready
+				sendUserInfo();
+				// Note: Don't load draft here - wait for auth-token-received
+				return;
+			}
+
+			// Handle auth-token-received - now it's safe to load draft
+			if (message.type === "auth-token-received") {
 				// Load draft if we have one
+				// NOTE: We can't use loadDraft() here because it checks isReady state,
+				// which may not have updated yet due to React's batched state updates.
+				// Instead, send the message directly - we know iframe is ready since it just responded.
 				if (draftId) {
-					loadDraft(draftId);
+					sendMessage({
+						type: "load-draft",
+						payload: { draftId },
+					});
 				}
+				return;
+			}
+
+			// Handle request-user-info message from reactive-resume
+			if (message.type === "request-user-info") {
+				sendUserInfo();
+				return;
+			}
+
+			// Handle request-token-refresh message from reactive-resume
+			if (message.type === "request-token-refresh") {
+				// Refresh token and send new one to iframe
+				refreshToken()
+					.then(() => {
+						sendAuthToken(true);
+					})
+					.catch((error) => {
+						console.error("Failed to refresh token:", error);
+						onAuthRequired?.();
+					});
+				return;
+			}
+
+			// Handle auth-required message from reactive-resume
+			if (message.type === "auth-required") {
+				onAuthRequired?.();
+				return;
+			}
+
+			// Handle logout message from reactive-resume
+			if (message.type === "logout") {
+				onLogout?.();
 				return;
 			}
 
@@ -267,25 +396,21 @@ export function useReactiveResumeIframe({
 		return () => {
 			window.removeEventListener("message", handleMessage);
 		};
-	}, [validateOrigin, onResumeUpdated, onDraftLoaded, onError, draftId, loadDraft, sendAuthToken]);
+	}, [validateOrigin, onResumeUpdated, onDraftLoaded, onError, onAuthRequired, onLogout, draftId, sendMessage, sendAuthToken, sendUserInfo, refreshToken]);
 
 	/**
-	 * Send auth token when user changes or iframe becomes ready
+	 * Send auth token and user info when user changes or iframe becomes ready
 	 */
 	useEffect(() => {
 		if (isReady && user) {
 			sendAuthToken();
+			sendUserInfo();
 		}
-	}, [isReady, user, sendAuthToken]);
+	}, [isReady, user, sendAuthToken, sendUserInfo]);
 
-	/**
-	 * Load draft when draftId changes
-	 */
-	useEffect(() => {
-		if (isReady && draftId) {
-			loadDraft(draftId);
-		}
-	}, [isReady, draftId, loadDraft]);
+	// NOTE: Draft loading is handled via auth-token-received message handler
+	// to ensure auth token is stored before API calls are made.
+	// Do NOT add a useEffect here that loads draft when isReady changes!
 
 	return {
 		isReady,

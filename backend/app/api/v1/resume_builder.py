@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 
 import structlog
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 
 from app.api.deps import AppSettings, CurrentUser, DBSession
 from app.infra.storage.s3 import S3Storage
@@ -56,6 +56,37 @@ from app.schemas.resume_builder import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+# ============================================================================
+# CORS Preflight Handler
+# ============================================================================
+
+
+@router.options("/drafts/{draft_id}")
+async def options_draft(draft_id: str) -> Response:
+    """Handle OPTIONS preflight requests for draft endpoints.
+    
+    This explicit handler ensures OPTIONS requests are handled before
+    dependency evaluation, preventing 400 errors on CORS preflight.
+    No dependencies to avoid any evaluation issues.
+    """
+    logger.info("options_draft_handler_called", draft_id=draft_id)
+    from app.config import get_settings
+    
+    settings = get_settings()
+    response = Response(status_code=200)
+    
+    # Add CORS headers
+    if settings.app_env == "development":
+        response.headers["Access-Control-Allow-Origin"] = "http://localhost:3000"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Max-Age"] = "3600"
+    
+    logger.info("options_draft_response_created", status=200)
+    return response
 
 
 # ============================================================================

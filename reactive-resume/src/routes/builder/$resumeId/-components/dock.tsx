@@ -2,42 +2,31 @@ import { t } from "@lingui/core/macro";
 import {
 	ArrowUUpLeftIcon,
 	ArrowUUpRightIcon,
-	CircleNotchIcon,
 	CubeFocusIcon,
 	FileJsIcon,
-	FilePdfIcon,
 	type Icon,
 	LinkSimpleIcon,
 	MagnifyingGlassMinusIcon,
 	MagnifyingGlassPlusIcon,
 } from "@phosphor-icons/react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
 import { motion } from "motion/react";
 import { useCallback, useMemo } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useControls } from "react-zoom-pan-pinch";
 import { toast } from "sonner";
 import { useCopyToClipboard } from "usehooks-ts";
-import { useTemporalStore } from "@/components/resume/store/resume";
+import { useResumeStore, useTemporalStore } from "@/components/resume/store/resume";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { authClient } from "@/integrations/auth/client";
-import { orpc } from "@/integrations/orpc/client";
-import { downloadFromUrl, downloadWithAnchor, generateFilename } from "@/utils/file";
+import { downloadWithAnchor, generateFilename } from "@/utils/file";
 import { cn } from "@/utils/style";
 
 export function BuilderDock() {
-	const { data: session } = authClient.useSession();
-	const params = useParams({ from: "/builder/$resumeId" });
-
 	const [_, copyToClipboard] = useCopyToClipboard();
 	const { zoomIn, zoomOut, centerView } = useControls();
 
-	const { data: resume } = useQuery(orpc.resume.getById.queryOptions({ input: { id: params.resumeId } }));
-	const { mutateAsync: printResumeAsPDF, isPending: isPrinting } = useMutation(
-		orpc.printer.printResumeAsPDF.mutationOptions(),
-	);
+	// Use Zustand store instead of ORPC query - the resume is already loaded
+	const resume = useResumeStore((state) => state.resume);
 
 	const { undo, redo, pastStates, futureStates } = useTemporalStore((state) => ({
 		undo: state.undo,
@@ -53,9 +42,9 @@ export function BuilderDock() {
 	useHotkeys(["mod+y", "mod+shift+z"], () => redo(), { enabled: canRedo, preventDefault: true });
 
 	const publicUrl = useMemo(() => {
-		if (!session?.user.username || !resume?.slug) return "";
-		return `${window.location.origin}/${session.user.username}/${resume.slug}`;
-	}, [session?.user.username, resume?.slug]);
+		if (!resume?.id) return "";
+		return `${window.location.origin}/resume/${resume.id}`;
+	}, [resume?.id]);
 
 	const onCopyUrl = useCallback(async () => {
 		await copyToClipboard(publicUrl);
@@ -70,24 +59,6 @@ export function BuilderDock() {
 
 		downloadWithAnchor(blob, filename);
 	}, [resume?.data]);
-
-	const onDownloadPDF = useCallback(async () => {
-		if (!resume?.id) return;
-
-		const filename = generateFilename(resume.data.basics.name, "pdf");
-		const toastId = toast.loading(t`Please wait while your PDF is being generated...`, {
-			description: t`This may take a while depending on the server capacity. Please do not close the window or refresh the page.`,
-		});
-
-		try {
-			const { url } = await printResumeAsPDF({ id: resume.id });
-			downloadFromUrl(url, filename);
-		} catch {
-			toast.error(t`There was a problem while generating the PDF, please try again in some time.`);
-		} finally {
-			toast.dismiss(toastId);
-		}
-	}, [resume?.id, resume?.data.basics.name, printResumeAsPDF]);
 
 	return (
 		<div className="fixed inset-x-0 bottom-4 flex items-center justify-center">
@@ -123,13 +94,6 @@ export function BuilderDock() {
 				<div className="mx-1 h-8 w-px bg-border" />
 				<DockIcon icon={LinkSimpleIcon} title={t`Copy URL`} onClick={() => onCopyUrl()} />
 				<DockIcon icon={FileJsIcon} title={t`Download JSON`} onClick={() => onDownloadJSON()} />
-				<DockIcon
-					title={t`Download PDF`}
-					disabled={isPrinting}
-					onClick={() => onDownloadPDF()}
-					icon={isPrinting ? CircleNotchIcon : FilePdfIcon}
-					iconClassName={cn(isPrinting && "animate-spin")}
-				/>
 			</motion.div>
 		</div>
 	);

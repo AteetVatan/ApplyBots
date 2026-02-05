@@ -101,6 +101,7 @@ async def test_database_connection() -> dict[str, Any]:
             engine, class_=AsyncSession, expire_on_commit=False
         )
         
+        session: AsyncSession
         async with async_session() as session:
             await session.execute(text("SELECT 1"))
             await session.commit()

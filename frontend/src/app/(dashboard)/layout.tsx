@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@/providers/AuthProvider";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
 import Link from "next/link";
 import {
@@ -15,6 +15,8 @@ import {
   Sparkles,
   PenLine,
 } from "lucide-react";
+
+const BUILDER_PATH = "/dashboard/resumes/builder";
 
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -34,12 +36,15 @@ export default function DashboardLayout({
 }) {
   const { user, isLoading, logout } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!isLoading && !user) {
       router.push("/login");
     }
   }, [user, isLoading, router]);
+
+  const contentPadding = pathname === BUILDER_PATH ? "" : "p-8";
 
   if (isLoading) {
     return (
@@ -92,7 +97,7 @@ export default function DashboardLayout({
 
       {/* Main content */}
       <main className="flex-1 overflow-auto">
-        <div className="p-8">
+        <div className={contentPadding}>
           {children}
         </div>
       </main>

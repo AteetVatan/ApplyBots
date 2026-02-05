@@ -1,12 +1,19 @@
 import { ORPCError } from "@orpc/server";
-import type { InferSelectModel } from "drizzle-orm";
 import puppeteer, { type Browser, type ConnectOptions } from "puppeteer-core";
-import type { schema } from "@/integrations/drizzle";
+import type { ResumeData } from "@/schema/resume/data";
 import { pageDimensionsAsPixels } from "@/schema/page";
 import { printMarginTemplates } from "@/schema/templates";
 import { env } from "@/utils/env";
 import { generatePrinterToken } from "@/utils/printer-token";
 import { getStorageService, uploadFile } from "./storage";
+
+// Type for resume input to printer service
+type ResumeInput = {
+	id: string;
+	data: ResumeData;
+	userId: string;
+	updatedAt?: Date;
+};
 
 const SCREENSHOT_TTL = 1000 * 60 * 60 * 6; // 6 hours
 
@@ -77,7 +84,7 @@ export const printerService = {
 	 * 7. Upload to storage and return the URL
 	 */
 	printResumeAsPDF: async (
-		input: Pick<InferSelectModel<typeof schema.resume>, "id" | "data" | "userId">,
+		input: Pick<ResumeInput, "id" | "data" | "userId">,
 	): Promise<string> => {
 		const { id, data, userId } = input;
 
@@ -239,7 +246,7 @@ export const printerService = {
 	},
 
 	getResumeScreenshot: async (
-		input: Pick<InferSelectModel<typeof schema.resume>, "userId" | "id" | "data" | "updatedAt">,
+		input: Pick<ResumeInput, "userId" | "id" | "data" | "updatedAt">,
 	): Promise<string> => {
 		const { id, userId, data, updatedAt } = input;
 
@@ -251,13 +258,22 @@ export const printerService = {
 		const resumeUpdatedAt = updatedAt.getTime();
 
 		if (existingScreenshots.length > 0) {
+			// Backend returns FileInfo[] with url, key, and lastModified
 			const sortedFiles = existingScreenshots
-				.map((path) => {
-					const filename = path.split("/").pop();
+				.map((fileInfo) => {
+					// Extract timestamp from filename or use lastModified
+					const filename = fileInfo.key.split("/").pop();
 					const match = filename?.match(/^(\d+)\.webp$/);
-					return match ? { path, timestamp: Number(match[1]) } : null;
+					const timestamp = match
+						? Number(match[1])
+						: new Date(fileInfo.lastModified).getTime();
+
+					return {
+						url: fileInfo.url,
+						key: fileInfo.key,
+						timestamp,
+					};
 				})
-				.filter((item): item is { path: string; timestamp: number } => item !== null)
 				.sort((a, b) => b.timestamp - a.timestamp);
 
 			if (sortedFiles.length > 0) {
@@ -265,17 +281,17 @@ export const printerService = {
 				const age = now - latest.timestamp;
 
 				// Return existing screenshot if it's still fresh (within TTL)
-				if (age < SCREENSHOT_TTL) return new URL(latest.path, env.APP_URL).toString();
+				if (age < SCREENSHOT_TTL) return latest.url;
 
 				// Screenshot is stale (past TTL), but only regenerate if the resume
 				// was updated after the screenshot was taken. If the resume hasn't
 				// changed, keep using the existing screenshot to avoid unnecessary work.
 				if (resumeUpdatedAt <= latest.timestamp) {
-					return new URL(latest.path, env.APP_URL).toString();
+					return latest.url;
 				}
 
 				// Resume was updated after the screenshot - delete old ones and regenerate
-				await Promise.all(sortedFiles.map((file) => storageService.delete(file.path)));
+				await Promise.all(sortedFiles.map((file) => storageService.delete(file.key)));
 			}
 		}
 

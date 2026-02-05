@@ -92,22 +92,6 @@ services:
       seaweedfs:
         condition: service_healthy
 
-  mailpit:
-    image: axllent/mailpit:latest
-    restart: unless-stopped
-    volumes:
-      - mailpit_data:/data
-    ports:
-      - "1025:1025"
-      - "8025:8025"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8025/"]
-      start_period: 10s
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
 volumes:
-  mailpit_data:
   postgres_data:
   seaweedfs_data:

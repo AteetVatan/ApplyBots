@@ -3,7 +3,6 @@ import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query
 import { ErrorScreen } from "./components/layout/error-screen";
 import { LoadingScreen } from "./components/layout/loading-screen";
 import { NotFoundScreen } from "./components/layout/not-found-screen";
-import { getSession } from "./integrations/auth/functions";
 import { client, orpc } from "./integrations/orpc/client";
 import { getQueryClient } from "./integrations/query/client";
 import { routeTree } from "./routeTree.gen";
@@ -15,22 +14,23 @@ import { initPostMessageClient } from "./lib/postmessage-client";
 export const getRouter = async () => {
 	const queryClient = getQueryClient();
 
-	// Initialize API client and postMessage client
+	// Initialize API client, storage client, and postMessage client
 	if (typeof window !== "undefined") {
+		const { initStorageClient } = await import("@/lib/storage-client");
 		const baseURL = import.meta.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 		const getAuthToken = () => {
 			return localStorage.getItem("ApplyBots_access_token") || null;
 		};
 		initAPIClient(baseURL, getAuthToken);
+		initStorageClient(baseURL, getAuthToken);
 		
 		const parentOrigin = import.meta.env.NEXT_PUBLIC_IFRAME_PARENT_ORIGIN || "http://localhost:3000";
 		initPostMessageClient(parentOrigin);
 	}
 
-	const [theme, locale, session, flags] = await Promise.all([
+	const [theme, locale, flags] = await Promise.all([
 		getTheme(),
 		getLocale(),
-		getSession().catch(() => null), // Allow auth to fail - we use JWT
 		client.flags.get().catch(() => ({})), // Allow flags to fail
 	]);
 
@@ -45,7 +45,7 @@ export const getRouter = async () => {
 		defaultErrorComponent: ErrorScreen,
 		defaultPendingComponent: LoadingScreen,
 		defaultNotFoundComponent: NotFoundScreen,
-		context: { orpc, queryClient, theme, locale, session, flags },
+		context: { orpc, queryClient, theme, locale, flags },
 	});
 
 	setupRouterSsrQueryIntegration({

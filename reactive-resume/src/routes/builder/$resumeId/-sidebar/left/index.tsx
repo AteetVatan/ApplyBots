@@ -105,11 +105,11 @@ function SidebarEdge({ scrollAreaRef }: SidebarEdgeProps) {
 			</div>
 
 			<UserDropdownMenu>
-				{({ session }) => (
+				{({ user }) => (
 					<Button size="icon" variant="ghost">
 						<Avatar className="size-6">
-							<AvatarImage src={session.user.image ?? undefined} />
-							<AvatarFallback className="text-[0.5rem]">{getInitials(session.user.name)}</AvatarFallback>
+							<AvatarImage src={user?.image ?? undefined} />
+							<AvatarFallback className="text-[0.5rem]">{user ? getInitials(user.name) : ""}</AvatarFallback>
 						</Avatar>
 					</Button>
 				)}
