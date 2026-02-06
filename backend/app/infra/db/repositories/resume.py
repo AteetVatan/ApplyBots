@@ -91,11 +91,16 @@ class SQLResumeRepository:
             ]
             education = [
                 Education(
-                    institution=e.get("institution", ""),
+                    school=e.get("school") or e.get("institution", ""),
+                    institution=e.get("institution") or e.get("school", ""),
                     degree=e.get("degree", ""),
-                    field_of_study=e.get("field_of_study"),
-                    graduation_date=e.get("graduation_date"),
-                    gpa=e.get("gpa"),
+                    area=e.get("area") or e.get("field_of_study", ""),
+                    field_of_study=e.get("field_of_study") or e.get("area"),
+                    grade=e.get("grade") or (str(e.get("gpa", "")) if e.get("gpa") else ""),
+                    gpa=e.get("gpa") or (e.get("grade") if e.get("grade") else None),
+                    location=e.get("location", ""),
+                    period=e.get("period") or e.get("graduation_date", ""),
+                    graduation_date=e.get("graduation_date") or e.get("period"),
                 )
                 for e in data.get("education", [])
             ]
@@ -147,11 +152,16 @@ class SQLResumeRepository:
             ],
             "education": [
                 {
-                    "institution": e.institution,
+                    "school": e.school or e.institution,
+                    "institution": e.institution or e.school,
                     "degree": e.degree,
-                    "field_of_study": e.field_of_study,
-                    "graduation_date": e.graduation_date,
-                    "gpa": e.gpa,
+                    "area": e.area or (e.field_of_study or ""),
+                    "field_of_study": e.field_of_study or e.area,
+                    "grade": e.grade or (str(e.gpa) if e.gpa else ""),
+                    "gpa": e.gpa or (e.grade if e.grade else None),
+                    "location": e.location,
+                    "period": e.period or (e.graduation_date or ""),
+                    "graduation_date": e.graduation_date or e.period,
                 }
                 for e in parsed.education
             ],

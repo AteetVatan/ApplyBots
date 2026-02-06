@@ -1,18 +1,17 @@
 /**
- * Resume Builder page - Iframe layout with Reactive Resume and ATS score panel.
+ * Resume Builder page - Iframe layout with Reactive Resume and ATS score dropdown overlay.
  *
  * Standards: react_nextjs.mdc
  * - Client component for interactivity
- * - Resizable panels
- * - Always-visible ATS score panel
- * - Reactive Resume in iframe
+ * - ATS score dropdown overlay (collapsed button, expandable panel)
+ * - Reactive Resume in iframe (full width)
  */
 
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ATSScorePanel } from "@/components/resume-builder";
+import { ATSScoreDropdown } from "@/components/resume-builder/ATSScoreDropdown";
 import { useATSScore } from "@/hooks/useATSScore";
 import { useReactiveResumeIframe } from "@/hooks/useReactiveResumeIframe";
 import { useAuth } from "@/providers/AuthProvider";
@@ -23,9 +22,13 @@ import {
   ChevronLeft,
   Loader2,
   AlertCircle,
+  Download,
+  FileText,
 } from "lucide-react";
 
 const REACTIVE_RESUME_URL = process.env.NEXT_PUBLIC_REACTIVE_RESUME_URL || "http://localhost:3002";
+
+const TOKEN_KEY = "ApplyBots_access_token";
 
 export default function ResumeBuilderPage() {
   const router = useRouter();
@@ -42,6 +45,7 @@ export default function ResumeBuilderPage() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isCalculatingATS, setIsCalculatingATS] = useState(false);
   const [isDraftLoaded, setIsDraftLoaded] = useState(false);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
 
   // Use Reactive Resume iframe hook
   const {
@@ -178,42 +182,76 @@ export default function ResumeBuilderPage() {
   // NOTE: Resume data is now fetched in onDraftLoaded callback after the draft is loaded.
   // This ensures we don't try to get resume data before the draft has been loaded into the iframe.
 
-  // ATS panel resizable state
-  const MIN_ATS_WIDTH = 50;
-  const DEFAULT_ATS_WIDTH = 280;
-  const MAX_ATS_WIDTH = 700;
-  const [atsPanelWidth, setAtsPanelWidth] = useState(DEFAULT_ATS_WIDTH);
-  const [isATSPanelResizing, setIsATSPanelResizing] = useState(false);
+  // Export JSON handler
+  const handleExportJSON = async () => {
+    if (!draftIdFromUrl) return;
 
-  // ATS panel resize handler
-  const handleATSPanelMouseDown = useCallback(() => {
-    setIsATSPanelResizing(true);
-  }, []);
+    try {
+      const data = await getResumeData();
+      if (!data) return;
 
-  useEffect(() => {
-    if (!isATSPanelResizing) return;
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `resume-${draftIdFromUrl}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Failed to export JSON:", error);
+    }
+  };
 
-    const handleMouseMove = (e: MouseEvent) => {
-      const newWidth = window.innerWidth - e.clientX;
-      const constrainedWidth = Math.min(
-        Math.max(newWidth, MIN_ATS_WIDTH),
-        MAX_ATS_WIDTH
+  // Export PDF handler
+  const handleExportPDF = async () => {
+    if (!draftIdFromUrl) return;
+
+    // Get token from localStorage
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token) {
+      alert("Please log in to export PDF");
+      return;
+    }
+
+    setIsExportingPDF(true);
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/api/v1/resume-builder/drafts/${draftIdFromUrl}/export-pdf`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
       );
-      setAtsPanelWidth(constrainedWidth);
-    };
 
-    const handleMouseUp = () => {
-      setIsATSPanelResizing(false);
-    };
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: "Failed to generate PDF" }));
+        throw new Error(error.detail || "Failed to generate PDF");
+      }
 
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
+      const { url } = await response.json();
 
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isATSPanelResizing]);
+      // Try to open/download the PDF
+      const newWindow = window.open(url, "_blank");
+
+      if (!newWindow || newWindow.closed || typeof newWindow.closed === "undefined") {
+        // Popup was blocked - show message with manual link
+        alert(
+          "Download may have been blocked by your browser.\n\n" +
+          "Please allow popups for this site, or use the link that will be copied to your clipboard."
+        );
+        await navigator.clipboard.writeText(url);
+      }
+    } catch (error) {
+      console.error("Failed to export PDF:", error);
+      alert(error instanceof Error ? error.message : "Failed to generate PDF. Please try again.");
+    } finally {
+      setIsExportingPDF(false);
+    }
+  };
 
   // Calculate iframe URL
   const iframeUrl = draftIdFromUrl
@@ -231,6 +269,35 @@ export default function ResumeBuilderPage() {
           >
             <ChevronLeft className="h-4 w-4" />
             Back to Resumes
+          </button>
+
+          {/* Divider */}
+          <div className="h-6 w-px bg-border" />
+
+          {/* Export JSON Button */}
+          <button
+            onClick={handleExportJSON}
+            disabled={!isIframeReady || !draftIdFromUrl}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Export as JSON"
+          >
+            <Download className="h-4 w-4" />
+            JSON
+          </button>
+
+          {/* Export PDF Button */}
+          <button
+            onClick={handleExportPDF}
+            disabled={!isIframeReady || !draftIdFromUrl || isExportingPDF}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Export as PDF"
+          >
+            {isExportingPDF ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileText className="h-4 w-4" />
+            )}
+            {isExportingPDF ? "Generating..." : "PDF"}
           </button>
         </div>
         <div className="flex items-center gap-2">
@@ -250,14 +317,9 @@ export default function ResumeBuilderPage() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         {/* Reactive Resume Iframe */}
-        <div
-          className="flex-1 overflow-hidden"
-          style={{
-            width: `calc(100% - ${atsPanelWidth}px - 2px)`,
-          }}
-        >
+        <div className="flex-1 overflow-hidden w-full">
           <iframe
             ref={iframeRef}
             src={iframeUrl}
@@ -268,37 +330,26 @@ export default function ResumeBuilderPage() {
           />
         </div>
 
-        {/* Resizable Divider */}
-        <div
-          className="w-0.5 bg-border cursor-col-resize hover:bg-primary/50 transition-colors"
-          onMouseDown={handleATSPanelMouseDown}
-        />
-
-        {/* ATS Score Panel */}
-        <div
-          className="border-l bg-background overflow-y-auto"
-          style={{ width: `${atsPanelWidth}px` }}
-        >
-          <ATSScorePanel
-            totalScore={atsScore}
-            breakdown={atsBreakdown}
-            matchedKeywords={matchedKeywords}
-            missingKeywords={missingKeywords}
-            suggestions={suggestions}
-            isCalculating={isCalculatingATS || isCalculating}
-            onRecalculate={async () => {
-              try {
-                const data = await getResumeData();
-                if (data) {
-                  setResumeContent(data);
-                  // Trigger recalculation via the effect that watches normalizedResumeContent
-                }
-              } catch (error) {
-                console.error("Error recalculating ATS score:", error);
+        {/* ATS Score Dropdown Overlay */}
+        <ATSScoreDropdown
+          totalScore={atsScore}
+          breakdown={atsBreakdown}
+          matchedKeywords={matchedKeywords}
+          missingKeywords={missingKeywords}
+          suggestions={suggestions}
+          isCalculating={isCalculatingATS || isCalculating}
+          onRecalculate={async () => {
+            try {
+              const data = await getResumeData();
+              if (data) {
+                setResumeContent(data);
+                // Trigger recalculation via the effect that watches normalizedResumeContent
               }
-            }}
-          />
-        </div>
+            } catch (error) {
+              console.error("Error recalculating ATS score:", error);
+            }
+          }}
+        />
       </div>
     </div>
   );

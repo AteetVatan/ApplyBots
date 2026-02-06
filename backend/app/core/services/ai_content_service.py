@@ -451,30 +451,24 @@ Format your response with clear section headers."""
         suggestions = self._extract_list_section(result_text, "ADDITIONAL_SUGGESTIONS")
 
         # Create tailored content (copy and modify)
-        tailored_content = ResumeContent(
-            full_name=content.full_name,
-            email=content.email,
-            phone=content.phone,
-            location=content.location,
-            linkedin_url=content.linkedin_url,
-            portfolio_url=content.portfolio_url,
-            github_url=content.github_url,
-            professional_summary=summary_suggestion or content.professional_summary,
-            work_experience=content.work_experience.copy(),
-            education=content.education.copy(),
-            skills=content.skills,
-            projects=content.projects.copy(),
-            certifications=content.certifications.copy(),
-            awards=content.awards.copy(),
-            languages=content.languages.copy(),
-            custom_sections=content.custom_sections.copy(),
-            template_id=content.template_id,
-            section_order=content.section_order.copy(),
-            ats_score=content.ats_score,
-        )
+        # Import required classes for building the nested structure
+        from app.core.domain.resume import Summary
+        from copy import deepcopy
+
+        # Deep copy the content to avoid modifying original
+        tailored_content = deepcopy(content)
+
+        # Update summary if we have a new suggestion
+        if summary_suggestion:
+            tailored_content.summary = Summary(
+                title=content.summary.title,
+                columns=content.summary.columns,
+                hidden=content.summary.hidden,
+                content=summary_suggestion,
+            )
 
         changes_made = []
-        if summary_suggestion and summary_suggestion != content.professional_summary:
+        if summary_suggestion and summary_suggestion != content.summary.content:
             changes_made.append("Updated professional summary to match job requirements")
 
         logger.info(
@@ -518,22 +512,33 @@ Format your response with clear section headers."""
         """Format full resume content for prompts."""
         sections = []
 
-        sections.append(f"Name: {content.full_name}")
-        if content.professional_summary:
-            sections.append(f"\nSummary: {content.professional_summary}")
+        sections.append(f"Name: {content.basics.name}")
+        if content.summary.content:
+            sections.append(f"\nSummary: {content.summary.content}")
 
-        if content.work_experience:
+        experience_items = content.sections.experience.items
+        if experience_items:
             sections.append("\nExperience:")
-            sections.append(self._format_experience(content.work_experience))
+            for exp in experience_items[:5]:
+                line = f"- {exp.title} at {exp.company}"
+                if exp.period:
+                    line += f" ({exp.period})"
+                sections.append(line)
+                if exp.description:
+                    # Add first 100 chars of description
+                    desc = exp.description[:100].replace('\n', ' ')
+                    sections.append(f"  {desc}...")
 
-        if content.education:
+        education_items = content.sections.education.items
+        if education_items:
             sections.append("\nEducation:")
-            for edu in content.education[:3]:
-                sections.append(f"- {edu.degree} in {edu.field_of_study or 'N/A'} from {edu.institution}")
+            for edu in education_items[:3]:
+                sections.append(f"- {edu.degree} in {edu.area or 'N/A'} from {edu.school}")
 
-        all_skills = content.skills.technical + content.skills.soft + content.skills.tools
-        if all_skills:
-            sections.append(f"\nSkills: {', '.join(all_skills[:20])}")
+        skill_items = content.sections.skills.items
+        if skill_items:
+            skill_names = [skill.name for skill in skill_items[:20]]
+            sections.append(f"\nSkills: {', '.join(skill_names)}")
 
         return "\n".join(sections)
 

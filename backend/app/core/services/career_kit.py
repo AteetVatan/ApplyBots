@@ -325,17 +325,17 @@ Return JSON with "requirements" array and "target_profile" string.""",
                 for edu in cv.education:
                     bullets.append(f"{edu.get('degree', '')} from {edu.get('institution', '')}")
         else:
-            # ResumeContent from builder
-            for exp in cv.work_experience:
-                bullets.extend(exp.achievements)
+            # ResumeContent from builder (new nested structure)
+            for exp in cv.sections.experience.items:
                 if exp.description:
                     bullets.append(exp.description)
-            bullets.extend(cv.skills.technical)
-            bullets.extend(cv.skills.soft)
-            bullets.extend(cv.skills.tools)
-            for project in cv.projects:
-                bullets.append(f"{project.name}: {project.description}")
-                bullets.extend(project.highlights)
+            # Skills are now objects with .name
+            for skill in cv.sections.skills.items:
+                bullets.append(skill.name)
+                bullets.extend(skill.keywords)
+            for project in cv.sections.projects.items:
+                if project.name and project.description:
+                    bullets.append(f"{project.name}: {project.description}")
 
         return [b for b in bullets if b and len(b) > 10]
 
@@ -548,12 +548,14 @@ Return JSON with "delta_instructions" and "truth_notes" arrays.""",
                 for e in (original_cv.education or [])
             ]
         else:
-            name = original_cv.full_name
-            summary = original_cv.professional_summary or ""
-            skills = original_cv.skills.technical + original_cv.skills.tools
+            # ResumeContent from builder (new nested structure)
+            name = original_cv.basics.name
+            summary = original_cv.summary.content or ""
+            # Skills are now objects with .name
+            skills = [skill.name for skill in original_cv.sections.skills.items]
             education = [
-                f"{e.degree} - {e.institution}"
-                for e in original_cv.education
+                f"{e.degree} - {e.school}"
+                for e in original_cv.sections.education.items
             ]
 
         # Build tailored CV structure

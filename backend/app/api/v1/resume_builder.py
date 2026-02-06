@@ -6,26 +6,67 @@ Standards: python_clean.mdc
 - Proper error handling
 """
 
+import time
 import uuid
 from datetime import datetime
+from typing import Any
 
 import structlog
-from fastapi import APIRouter, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, HTTPException, Path, Query, Response, UploadFile, status
+from pydantic import BaseModel
 
 from app.api.deps import AppSettings, CurrentUser, DBSession
+from app.core.services.internal_token import (
+    generate_printer_token,
+    generate_service_token,
+    verify_service_token,
+)
+from app.infra.services.pdf_printer import generate_pdf
 from app.infra.storage.s3 import S3Storage
 from app.core.domain.resume import (
     Award,
+    AwardsSection,
+    Basics,
     Certification,
+    CertificationsSection,
+    ColorDesign,
+    Css,
     CustomLink,
     CustomSection,
+    CustomSectionItem,
+    Design,
     Education,
-    LanguageProficiency,
+    EducationSection,
+    ExperienceSection,
+    InterestItem,
+    InterestsSection,
     LanguageSkill,
+    LanguagesSection,
+    Layout,
+    LevelDesign,
+    Metadata,
+    Page,
+    PageLayout,
+    PictureSettings,
+    ProfileItem,
+    ProfilesSection,
     Project,
+    ProjectsSection,
+    Publication,
+    PublicationsSection,
+    Reference,
+    ReferencesSection,
     ResumeContent,
     ResumeDraft,
+    Sections,
+    SkillItem,
     SkillsSection,
+    Summary,
+    Typography,
+    TypographyItem,
+    Url,
+    Volunteer,
+    VolunteerSection,
     WorkExperience,
 )
 from app.core.services.ai_content_service import AIContentService
@@ -35,6 +76,9 @@ from app.infra.db.repositories.job import SQLJobRepository
 from app.schemas.resume_builder import (
     ATSScoreRequest,
     ATSScoreResponse,
+    BasicsSchema,
+    CertificationsSectionSchema,
+    CustomSectionSchema as CustomSectionSchemaAPI,
     DraftCreateRequest,
     DraftListResponse,
     DraftResponse,
@@ -43,19 +87,45 @@ from app.schemas.resume_builder import (
     EnhanceBulletResponse,
     GenerateSummaryRequest,
     GenerateSummaryResponse,
+    MetadataSchema,
+    PictureSettingsSchema,
     ProfilePictureResponse,
     ResumeContentSchema,
+    SectionsSchema,
     SuggestSkillsRequest,
     SuggestSkillsResponse,
+    SummarySchema,
     TailorForJobRequest,
     TailorForJobResponse,
     TemplateListResponse,
     TemplateSchema,
+    UrlSchema,
 )
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+# UUID regex pattern for draft_id validation
+UUID_REGEX = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+
+# ============================================================================
+# Static Asset Handlers (catch misrouted .svg requests)
+# ============================================================================
+
+
+@router.get("/drafts/{filename}.svg", include_in_schema=False)
+@router.get("/drafts/{filename}.png", include_in_schema=False)
+@router.get("/drafts/{filename}.jpg", include_in_schema=False)
+@router.get("/drafts/{filename}.ico", include_in_schema=False)
+async def catch_static_assets(filename: str) -> Response:
+    """Catch misrouted static asset requests and return 404.
+    
+    These requests come from Reactive Resume's iframe trying to load
+    theme icons with relative paths. No auth required.
+    """
+    return Response(status_code=404)
 
 
 # ============================================================================
@@ -64,7 +134,7 @@ router = APIRouter()
 
 
 @router.options("/drafts/{draft_id}")
-async def options_draft(draft_id: str) -> Response:
+async def options_draft(draft_id: str = Path(..., pattern=UUID_REGEX)) -> Response:
     """Handle OPTIONS preflight requests for draft endpoints.
     
     This explicit handler ensures OPTIONS requests are handled before
@@ -94,213 +164,691 @@ async def options_draft(draft_id: str) -> Response:
 # ============================================================================
 
 
+def _url_schema_to_domain(url_schema: UrlSchema) -> Url:
+    """Convert UrlSchema to Url domain model."""
+    return Url(url=url_schema.url, label=url_schema.label)
+
+
+def _url_domain_to_schema(url: Url) -> UrlSchema:
+    """Convert Url domain model to UrlSchema."""
+    return UrlSchema(url=url.url, label=url.label)
+
+
 def schema_to_content(schema: ResumeContentSchema) -> ResumeContent:
-    """Convert schema to domain model."""
+    """Convert ResumeContentSchema to ResumeContent domain model."""
+    # Convert picture
+    picture = PictureSettings(
+        hidden=schema.picture.hidden,
+        url=schema.picture.url,
+        size=schema.picture.size,
+        rotation=schema.picture.rotation,
+        aspect_ratio=schema.picture.aspect_ratio,
+        border_radius=schema.picture.border_radius,
+        border_color=schema.picture.border_color,
+        border_width=schema.picture.border_width,
+        shadow_color=schema.picture.shadow_color,
+        shadow_width=schema.picture.shadow_width,
+    )
+
+    # Convert basics
+    basics = Basics(
+        name=schema.basics.name,
+        headline=schema.basics.headline,
+        email=schema.basics.email,
+        phone=schema.basics.phone,
+        location=schema.basics.location,
+        website=_url_schema_to_domain(schema.basics.website),
+        custom_fields=[
+            CustomLink(id=cf.id, icon=cf.icon, text=cf.text, link=cf.link)
+            for cf in schema.basics.custom_fields
+        ],
+    )
+
+    # Convert summary
+    summary = Summary(
+        title=schema.summary.title,
+        columns=schema.summary.columns,
+        hidden=schema.summary.hidden,
+        content=schema.summary.content,
+    )
+
+    # Convert sections
+    sections = _schema_sections_to_domain(schema.sections)
+
+    # Convert custom sections
+    custom_sections = [
+        _schema_custom_section_to_domain(cs)
+        for cs in schema.custom_sections
+    ]
+
+    # Convert metadata
+    metadata = _schema_metadata_to_domain(schema.metadata)
+
     return ResumeContent(
-        full_name=schema.full_name,
-        email=schema.email,
-        phone=schema.phone,
-        location=schema.location,
-        linkedin_url=schema.linkedin_url,
-        portfolio_url=schema.portfolio_url,
-        github_url=schema.github_url,
-        profile_picture_url=schema.profile_picture_url,
-        custom_links=[
-            CustomLink(id=cl.id, label=cl.label, url=cl.url)
-            for cl in schema.custom_links
-        ],
-        professional_summary=schema.professional_summary,
-        work_experience=[
-            WorkExperience(
-                company=w.company,
-                title=w.title,
-                start_date=w.start_date,
-                end_date=w.end_date,
-                description=w.description,
-                achievements=w.achievements,
-                location=w.location,
-                is_current=w.is_current,
-            )
-            for w in schema.work_experience
-        ],
-        education=[
-            Education(
-                institution=e.institution,
-                degree=e.degree,
-                field_of_study=e.field_of_study,
-                graduation_date=e.graduation_date,
-                gpa=e.gpa,
-                location=e.location,
-                achievements=e.achievements,
-            )
-            for e in schema.education
-        ],
-        skills=SkillsSection(
-            technical=schema.skills.technical,
-            soft=schema.skills.soft,
-            tools=schema.skills.tools,
+        picture=picture,
+        basics=basics,
+        summary=summary,
+        sections=sections,
+        custom_sections=custom_sections,
+        metadata=metadata,
+    )
+
+
+def _schema_sections_to_domain(schema: SectionsSchema) -> Sections:
+    """Convert SectionsSchema to Sections domain model."""
+    return Sections(
+        profiles=ProfilesSection(
+            title=schema.profiles.title,
+            columns=schema.profiles.columns,
+            hidden=schema.profiles.hidden,
+            items=[
+                ProfileItem(
+                    id=p.id, hidden=p.hidden, icon=p.icon,
+                    network=p.network, username=p.username,
+                    website=_url_schema_to_domain(p.website),
+                )
+                for p in schema.profiles.items
+            ],
         ),
-        projects=[
-            Project(
-                name=p.name,
-                description=p.description,
-                url=p.url,
-                technologies=p.technologies,
-                start_date=p.start_date,
-                end_date=p.end_date,
-                highlights=p.highlights,
+        experience=ExperienceSection(
+            title=schema.experience.title,
+            columns=schema.experience.columns,
+            hidden=schema.experience.hidden,
+            items=[
+                WorkExperience(
+                    id=e.id, hidden=e.hidden, company=e.company,
+                    title=e.title, location=e.location, period=e.period,
+                    website=_url_schema_to_domain(e.website),
+                    description=e.description,
+                )
+                for e in schema.experience.items
+            ],
+        ),
+        education=EducationSection(
+            title=schema.education.title,
+            columns=schema.education.columns,
+            hidden=schema.education.hidden,
+            items=[
+                Education(
+                    id=e.id, hidden=e.hidden, school=e.school,
+                    degree=e.degree, area=e.area, grade=e.grade,
+                    location=e.location, period=e.period,
+                    website=_url_schema_to_domain(e.website),
+                    description=e.description,
+                )
+                for e in schema.education.items
+            ],
+        ),
+        skills=SkillsSection(
+            title=schema.skills.title,
+            columns=schema.skills.columns,
+            hidden=schema.skills.hidden,
+            items=[
+                SkillItem(
+                    id=s.id, hidden=s.hidden, icon=s.icon,
+                    name=s.name, proficiency=s.proficiency,
+                    level=s.level, keywords=s.keywords,
+                )
+                for s in schema.skills.items
+            ],
+        ),
+        projects=ProjectsSection(
+            title=schema.projects.title,
+            columns=schema.projects.columns,
+            hidden=schema.projects.hidden,
+            items=[
+                Project(
+                    id=p.id, hidden=p.hidden, name=p.name,
+                    period=p.period, website=_url_schema_to_domain(p.website),
+                    description=p.description,
+                )
+                for p in schema.projects.items
+            ],
+        ),
+        awards=AwardsSection(
+            title=schema.awards.title,
+            columns=schema.awards.columns,
+            hidden=schema.awards.hidden,
+            items=[
+                Award(
+                    id=a.id, hidden=a.hidden, title=a.title,
+                    awarder=a.awarder, date=a.date,
+                    website=_url_schema_to_domain(a.website),
+                    description=a.description,
+                )
+                for a in schema.awards.items
+            ],
+        ),
+        certifications=CertificationsSection(
+            title=schema.certifications.title,
+            columns=schema.certifications.columns,
+            hidden=schema.certifications.hidden,
+            items=[
+                Certification(
+                    id=c.id, hidden=c.hidden, title=c.title,
+                    issuer=c.issuer, date=c.date,
+                    website=_url_schema_to_domain(c.website),
+                    description=c.description,
+                )
+                for c in schema.certifications.items
+            ],
+        ),
+        languages=LanguagesSection(
+            title=schema.languages.title,
+            columns=schema.languages.columns,
+            hidden=schema.languages.hidden,
+            items=[
+                LanguageSkill(
+                    id=l.id, hidden=l.hidden, language=l.language,
+                    fluency=l.fluency, level=l.level,
+                )
+                for l in schema.languages.items
+            ],
+        ),
+        interests=InterestsSection(
+            title=schema.interests.title,
+            columns=schema.interests.columns,
+            hidden=schema.interests.hidden,
+            items=[
+                InterestItem(
+                    id=i.id, hidden=i.hidden, icon=i.icon,
+                    name=i.name, keywords=i.keywords,
+                )
+                for i in schema.interests.items
+            ],
+        ),
+        volunteer=VolunteerSection(
+            title=schema.volunteer.title,
+            columns=schema.volunteer.columns,
+            hidden=schema.volunteer.hidden,
+            items=[
+                Volunteer(
+                    id=v.id, hidden=v.hidden, organization=v.organization,
+                    location=v.location, period=v.period,
+                    website=_url_schema_to_domain(v.website),
+                    description=v.description,
+                )
+                for v in schema.volunteer.items
+            ],
+        ),
+        publications=PublicationsSection(
+            title=schema.publications.title,
+            columns=schema.publications.columns,
+            hidden=schema.publications.hidden,
+            items=[
+                Publication(
+                    id=p.id, hidden=p.hidden, title=p.title,
+                    publisher=p.publisher, date=p.date,
+                    website=_url_schema_to_domain(p.website),
+                    description=p.description,
+                )
+                for p in schema.publications.items
+            ],
+        ),
+        references=ReferencesSection(
+            title=schema.references.title,
+            columns=schema.references.columns,
+            hidden=schema.references.hidden,
+            items=[
+                Reference(
+                    id=r.id, hidden=r.hidden, name=r.name,
+                    position=r.position, phone=r.phone,
+                    website=_url_schema_to_domain(r.website),
+                    description=r.description,
+                )
+                for r in schema.references.items
+            ],
+        ),
+    )
+
+
+def _schema_custom_section_to_domain(schema: CustomSectionSchemaAPI) -> CustomSection:
+    """Convert CustomSectionSchema to CustomSection domain model."""
+    return CustomSection(
+        id=schema.id,
+        title=schema.title,
+        type=schema.type,
+        columns=schema.columns,
+        hidden=schema.hidden,
+        items=[
+            CustomSectionItem(
+                id=item.id,
+                hidden=item.hidden,
+                name=item.name,
+                title=item.title,
+                company=item.company,
+                school=item.school,
+                organization=item.organization,
+                position=item.position,
+                location=item.location,
+                period=item.period,
+                date=item.date,
+                website=_url_schema_to_domain(item.website),
+                description=item.description,
+                content=item.content,
+                icon=item.icon,
+                keywords=item.keywords,
+                proficiency=item.proficiency,
+                level=item.level,
+                fluency=item.fluency,
+                language=item.language,
+                awarder=item.awarder,
+                issuer=item.issuer,
+                publisher=item.publisher,
+                phone=item.phone,
+                network=item.network,
+                username=item.username,
+                recipient=item.recipient,
             )
-            for p in schema.projects
+            for item in schema.items
         ],
-        certifications=[
-            Certification(
-                name=c.name,
-                issuer=c.issuer,
-                date=c.date,
-                expiry_date=c.expiry_date,
-                credential_id=c.credential_id,
-                url=c.url,
-            )
-            for c in schema.certifications
-        ],
-        awards=[
-            Award(
-                title=a.title,
-                issuer=a.issuer,
-                date=a.date,
-                description=a.description,
-            )
-            for a in schema.awards
-        ],
-        languages=[
-            LanguageSkill(
-                language=lang.language,
-                proficiency=LanguageProficiency(lang.proficiency),
-            )
-            for lang in schema.languages
-        ],
-        custom_sections=[
-            CustomSection(
-                id=cs.id,
-                title=cs.title,
-                items=cs.items,
-            )
-            for cs in schema.custom_sections
-        ],
-        template_id=schema.template_id,
-        section_order=schema.section_order,
-        ats_score=schema.ats_score,
+    )
+
+
+def _schema_metadata_to_domain(schema: MetadataSchema) -> Metadata:
+    """Convert MetadataSchema to Metadata domain model."""
+    return Metadata(
+        template=schema.template,
+        layout=Layout(
+            sidebar_width=schema.layout.sidebar_width,
+            pages=[
+                PageLayout(
+                    full_width=p.full_width,
+                    main=p.main,
+                    sidebar=p.sidebar,
+                )
+                for p in schema.layout.pages
+            ],
+        ),
+        css=Css(enabled=schema.css.enabled, value=schema.css.value),
+        page=Page(
+            gap_x=schema.page.gap_x,
+            gap_y=schema.page.gap_y,
+            margin_x=schema.page.margin_x,
+            margin_y=schema.page.margin_y,
+            format=schema.page.format,
+            locale=schema.page.locale,
+            hide_icons=schema.page.hide_icons,
+        ),
+        design=Design(
+            level=LevelDesign(icon=schema.design.level.icon, type=schema.design.level.type),
+            colors=ColorDesign(
+                primary=schema.design.colors.primary,
+                text=schema.design.colors.text,
+                background=schema.design.colors.background,
+            ),
+        ),
+        typography=Typography(
+            body=TypographyItem(
+                font_family=schema.typography.body.font_family,
+                font_weights=schema.typography.body.font_weights,
+                font_size=schema.typography.body.font_size,
+                line_height=schema.typography.body.line_height,
+            ),
+            heading=TypographyItem(
+                font_family=schema.typography.heading.font_family,
+                font_weights=schema.typography.heading.font_weights,
+                font_size=schema.typography.heading.font_size,
+                line_height=schema.typography.heading.line_height,
+            ),
+        ),
+        notes=schema.notes,
     )
 
 
 def content_to_schema(content: ResumeContent) -> ResumeContentSchema:
-    """Convert domain model to schema."""
+    """Convert ResumeContent domain model to ResumeContentSchema."""
     from app.schemas.resume_builder import (
         AwardSchema,
+        AwardsSectionSchema,
+        BasicsSchema,
         CertificationSchema,
+        CertificationsSectionSchema,
+        ColorDesignSchema,
+        CssSchema,
         CustomLinkSchema,
+        CustomSectionItemSchema,
         CustomSectionSchema,
+        DesignSchema,
         EducationSchema,
+        EducationSectionSchema,
+        ExperienceSectionSchema,
+        InterestItemSchema,
+        InterestsSectionSchema,
         LanguageSkillSchema,
+        LanguagesSectionSchema,
+        LayoutSchema,
+        LevelDesignSchema,
+        MetadataSchema,
+        PageLayoutSchema,
+        PageSchema,
+        PictureSettingsSchema,
+        ProfileItemSchema,
+        ProfilesSectionSchema,
         ProjectSchema,
+        ProjectsSectionSchema,
+        PublicationSchema,
+        PublicationsSectionSchema,
+        ReferenceSchema,
+        ReferencesSectionSchema,
+        SectionsSchema,
+        SkillItemSchema,
         SkillsSectionSchema,
+        SummarySchema,
+        TypographyItemSchema,
+        TypographySchema,
+        UrlSchema,
+        VolunteerSchema,
+        VolunteerSectionSchema,
         WorkExperienceSchema,
     )
 
-    return ResumeContentSchema(
-        full_name=content.full_name,
-        email=content.email,
-        phone=content.phone,
-        location=content.location,
-        linkedin_url=content.linkedin_url,
-        portfolio_url=content.portfolio_url,
-        github_url=content.github_url,
-        profile_picture_url=content.profile_picture_url,
-        custom_links=[
-            CustomLinkSchema(id=cl.id, label=cl.label, url=cl.url)
-            for cl in content.custom_links
+    # Convert picture
+    picture = PictureSettingsSchema(
+        hidden=content.picture.hidden,
+        url=content.picture.url,
+        size=content.picture.size,
+        rotation=content.picture.rotation,
+        aspectRatio=content.picture.aspect_ratio,
+        borderRadius=content.picture.border_radius,
+        borderColor=content.picture.border_color,
+        borderWidth=content.picture.border_width,
+        shadowColor=content.picture.shadow_color,
+        shadowWidth=content.picture.shadow_width,
+    )
+
+    # Convert basics
+    basics = BasicsSchema(
+        name=content.basics.name,
+        headline=content.basics.headline,
+        email=content.basics.email,
+        phone=content.basics.phone,
+        location=content.basics.location,
+        website=UrlSchema(url=content.basics.website.url, label=content.basics.website.label),
+        customFields=[
+            CustomLinkSchema(id=cf.id, icon=cf.icon, text=cf.text, link=cf.link)
+            for cf in content.basics.custom_fields
         ],
-        professional_summary=content.professional_summary,
-        work_experience=[
-            WorkExperienceSchema(
-                company=w.company,
-                title=w.title,
-                start_date=w.start_date,
-                end_date=w.end_date,
-                description=w.description,
-                achievements=w.achievements,
-                location=w.location,
-                is_current=w.is_current,
-            )
-            for w in content.work_experience
-        ],
-        education=[
-            EducationSchema(
-                institution=e.institution,
-                degree=e.degree,
-                field_of_study=e.field_of_study,
-                graduation_date=e.graduation_date,
-                gpa=e.gpa,
-                location=e.location,
-                achievements=e.achievements,
-            )
-            for e in content.education
-        ],
-        skills=SkillsSectionSchema(
-            technical=content.skills.technical,
-            soft=content.skills.soft,
-            tools=content.skills.tools,
+    )
+
+    # Convert summary
+    summary = SummarySchema(
+        title=content.summary.title,
+        columns=content.summary.columns,
+        hidden=content.summary.hidden,
+        content=content.summary.content,
+    )
+
+    # Convert sections
+    sections = SectionsSchema(
+        profiles=ProfilesSectionSchema(
+            title=content.sections.profiles.title,
+            columns=content.sections.profiles.columns,
+            hidden=content.sections.profiles.hidden,
+            items=[
+                ProfileItemSchema(
+                    id=p.id, hidden=p.hidden, icon=p.icon,
+                    network=p.network, username=p.username,
+                    website=UrlSchema(url=p.website.url, label=p.website.label),
+                )
+                for p in content.sections.profiles.items
+            ],
         ),
-        projects=[
-            ProjectSchema(
-                name=p.name,
-                description=p.description,
-                url=p.url,
-                technologies=p.technologies,
-                start_date=p.start_date,
-                end_date=p.end_date,
-                highlights=p.highlights,
-            )
-            for p in content.projects
-        ],
-        certifications=[
-            CertificationSchema(
-                name=c.name,
-                issuer=c.issuer,
-                date=c.date,
-                expiry_date=c.expiry_date,
-                credential_id=c.credential_id,
-                url=c.url,
-            )
-            for c in content.certifications
-        ],
-        awards=[
-            AwardSchema(
-                title=a.title,
-                issuer=a.issuer,
-                date=a.date,
-                description=a.description,
-            )
-            for a in content.awards
-        ],
-        languages=[
-            LanguageSkillSchema(
-                language=lang.language,
-                proficiency=lang.proficiency.value,
-            )
-            for lang in content.languages
-        ],
-        custom_sections=[
-            CustomSectionSchema(
-                id=cs.id,
-                title=cs.title,
-                items=cs.items,
-            )
-            for cs in content.custom_sections
-        ],
-        template_id=content.template_id,
-        section_order=content.section_order,
-        ats_score=content.ats_score,
+        experience=ExperienceSectionSchema(
+            title=content.sections.experience.title,
+            columns=content.sections.experience.columns,
+            hidden=content.sections.experience.hidden,
+            items=[
+                WorkExperienceSchema(
+                    id=e.id, hidden=e.hidden, company=e.company,
+                    title=e.title, location=e.location, period=e.period,
+                    website=UrlSchema(url=e.website.url, label=e.website.label),
+                    description=e.description,
+                )
+                for e in content.sections.experience.items
+            ],
+        ),
+        education=EducationSectionSchema(
+            title=content.sections.education.title,
+            columns=content.sections.education.columns,
+            hidden=content.sections.education.hidden,
+            items=[
+                EducationSchema(
+                    id=e.id, hidden=e.hidden, school=e.school,
+                    degree=e.degree, area=e.area, grade=e.grade,
+                    location=e.location, period=e.period,
+                    website=UrlSchema(url=e.website.url, label=e.website.label),
+                    description=e.description,
+                )
+                for e in content.sections.education.items
+            ],
+        ),
+        skills=SkillsSectionSchema(
+            title=content.sections.skills.title,
+            columns=content.sections.skills.columns,
+            hidden=content.sections.skills.hidden,
+            items=[
+                SkillItemSchema(
+                    id=s.id, hidden=s.hidden, icon=s.icon,
+                    name=s.name, proficiency=s.proficiency,
+                    level=s.level, keywords=s.keywords,
+                )
+                for s in content.sections.skills.items
+            ],
+        ),
+        projects=ProjectsSectionSchema(
+            title=content.sections.projects.title,
+            columns=content.sections.projects.columns,
+            hidden=content.sections.projects.hidden,
+            items=[
+                ProjectSchema(
+                    id=p.id, hidden=p.hidden, name=p.name,
+                    period=p.period,
+                    website=UrlSchema(url=p.website.url, label=p.website.label),
+                    description=p.description,
+                )
+                for p in content.sections.projects.items
+            ],
+        ),
+        awards=AwardsSectionSchema(
+            title=content.sections.awards.title,
+            columns=content.sections.awards.columns,
+            hidden=content.sections.awards.hidden,
+            items=[
+                AwardSchema(
+                    id=a.id, hidden=a.hidden, title=a.title,
+                    awarder=a.awarder, date=a.date,
+                    website=UrlSchema(url=a.website.url, label=a.website.label),
+                    description=a.description,
+                )
+                for a in content.sections.awards.items
+            ],
+        ),
+        certifications=CertificationsSectionSchema(
+            title=content.sections.certifications.title,
+            columns=content.sections.certifications.columns,
+            hidden=content.sections.certifications.hidden,
+            items=[
+                CertificationSchema(
+                    id=c.id, hidden=c.hidden, title=c.title,
+                    issuer=c.issuer, date=c.date,
+                    website=UrlSchema(url=c.website.url, label=c.website.label),
+                    description=c.description,
+                )
+                for c in content.sections.certifications.items
+            ],
+        ),
+        languages=LanguagesSectionSchema(
+            title=content.sections.languages.title,
+            columns=content.sections.languages.columns,
+            hidden=content.sections.languages.hidden,
+            items=[
+                LanguageSkillSchema(
+                    id=l.id, hidden=l.hidden, language=l.language,
+                    fluency=l.fluency, level=l.level,
+                )
+                for l in content.sections.languages.items
+            ],
+        ),
+        interests=InterestsSectionSchema(
+            title=content.sections.interests.title,
+            columns=content.sections.interests.columns,
+            hidden=content.sections.interests.hidden,
+            items=[
+                InterestItemSchema(
+                    id=i.id, hidden=i.hidden, icon=i.icon,
+                    name=i.name, keywords=i.keywords,
+                )
+                for i in content.sections.interests.items
+            ],
+        ),
+        volunteer=VolunteerSectionSchema(
+            title=content.sections.volunteer.title,
+            columns=content.sections.volunteer.columns,
+            hidden=content.sections.volunteer.hidden,
+            items=[
+                VolunteerSchema(
+                    id=v.id, hidden=v.hidden, organization=v.organization,
+                    location=v.location, period=v.period,
+                    website=UrlSchema(url=v.website.url, label=v.website.label),
+                    description=v.description,
+                )
+                for v in content.sections.volunteer.items
+            ],
+        ),
+        publications=PublicationsSectionSchema(
+            title=content.sections.publications.title,
+            columns=content.sections.publications.columns,
+            hidden=content.sections.publications.hidden,
+            items=[
+                PublicationSchema(
+                    id=p.id, hidden=p.hidden, title=p.title,
+                    publisher=p.publisher, date=p.date,
+                    website=UrlSchema(url=p.website.url, label=p.website.label),
+                    description=p.description,
+                )
+                for p in content.sections.publications.items
+            ],
+        ),
+        references=ReferencesSectionSchema(
+            title=content.sections.references.title,
+            columns=content.sections.references.columns,
+            hidden=content.sections.references.hidden,
+            items=[
+                ReferenceSchema(
+                    id=r.id, hidden=r.hidden, name=r.name,
+                    position=r.position, phone=r.phone,
+                    website=UrlSchema(url=r.website.url, label=r.website.label),
+                    description=r.description,
+                )
+                for r in content.sections.references.items
+            ],
+        ),
+    )
+
+    # Convert custom sections
+    custom_sections = [
+        CustomSectionSchema(
+            id=cs.id,
+            title=cs.title,
+            type=cs.type,
+            columns=cs.columns,
+            hidden=cs.hidden,
+            items=[
+                CustomSectionItemSchema(
+                    id=item.id,
+                    hidden=item.hidden,
+                    name=item.name,
+                    title=item.title,
+                    company=item.company,
+                    school=item.school,
+                    organization=item.organization,
+                    position=item.position,
+                    location=item.location,
+                    period=item.period,
+                    date=item.date,
+                    website=UrlSchema(url=item.website.url, label=item.website.label),
+                    description=item.description,
+                    content=item.content,
+                    icon=item.icon,
+                    keywords=item.keywords,
+                    proficiency=item.proficiency,
+                    level=item.level,
+                    fluency=item.fluency,
+                    language=item.language,
+                    awarder=item.awarder,
+                    issuer=item.issuer,
+                    publisher=item.publisher,
+                    phone=item.phone,
+                    network=item.network,
+                    username=item.username,
+                    recipient=item.recipient,
+                )
+                for item in cs.items
+            ],
+        )
+        for cs in content.custom_sections
+    ]
+
+    # Convert metadata
+    metadata = MetadataSchema(
+        template=content.metadata.template,
+        layout=LayoutSchema(
+            sidebarWidth=content.metadata.layout.sidebar_width,
+            pages=[
+                PageLayoutSchema(
+                    fullWidth=p.full_width,
+                    main=p.main,
+                    sidebar=p.sidebar,
+                )
+                for p in content.metadata.layout.pages
+            ],
+        ),
+        css=CssSchema(enabled=content.metadata.css.enabled, value=content.metadata.css.value),
+        page=PageSchema(
+            gapX=content.metadata.page.gap_x,
+            gapY=content.metadata.page.gap_y,
+            marginX=content.metadata.page.margin_x,
+            marginY=content.metadata.page.margin_y,
+            format=content.metadata.page.format,
+            locale=content.metadata.page.locale,
+            hideIcons=content.metadata.page.hide_icons,
+        ),
+        design=DesignSchema(
+            level=LevelDesignSchema(
+                icon=content.metadata.design.level.icon,
+                type=content.metadata.design.level.type,
+            ),
+            colors=ColorDesignSchema(
+                primary=content.metadata.design.colors.primary,
+                text=content.metadata.design.colors.text,
+                background=content.metadata.design.colors.background,
+            ),
+        ),
+        typography=TypographySchema(
+            body=TypographyItemSchema(
+                fontFamily=content.metadata.typography.body.font_family,
+                fontWeights=content.metadata.typography.body.font_weights,
+                fontSize=content.metadata.typography.body.font_size,
+                lineHeight=content.metadata.typography.body.line_height,
+            ),
+            heading=TypographyItemSchema(
+                fontFamily=content.metadata.typography.heading.font_family,
+                fontWeights=content.metadata.typography.heading.font_weights,
+                fontSize=content.metadata.typography.heading.font_size,
+                lineHeight=content.metadata.typography.heading.line_height,
+            ),
+        ),
+        notes=content.metadata.notes,
+    )
+
+    return ResumeContentSchema(
+        picture=picture,
+        basics=basics,
+        summary=summary,
+        sections=sections,
+        customSections=custom_sections,
+        metadata=metadata,
     )
 
 
@@ -360,8 +908,11 @@ async def create_draft(
     content = (
         schema_to_content(request.content)
         if request.content
-        else ResumeContent(template_id=request.template_id)
+        else ResumeContent()
     )
+
+    # Set template in metadata
+    content.metadata.template = request.template_id
 
     draft = ResumeDraft(
         id=str(uuid.uuid4()),
@@ -380,7 +931,8 @@ async def create_draft(
 
 @router.get("/drafts/{draft_id}", response_model=DraftResponse)
 async def get_draft(
-    draft_id: str,
+    draft_id: str = Path(..., pattern=UUID_REGEX),
+    *,
     user: CurrentUser,
     db: DBSession,
 ) -> DraftResponse:
@@ -399,7 +951,8 @@ async def get_draft(
 
 @router.patch("/drafts/{draft_id}", response_model=DraftResponse)
 async def update_draft(
-    draft_id: str,
+    draft_id: str = Path(..., pattern=UUID_REGEX),
+    *,
     request: DraftUpdateRequest,
     user: CurrentUser,
     db: DBSession,
@@ -421,6 +974,7 @@ async def update_draft(
         draft.content = schema_to_content(request.content)
     if request.template_id is not None:
         draft.template_id = request.template_id
+        draft.content.metadata.template = request.template_id
 
     draft.updated_at = datetime.utcnow()
 
@@ -432,7 +986,8 @@ async def update_draft(
 
 @router.delete("/drafts/{draft_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_draft(
-    draft_id: str,
+    draft_id: str = Path(..., pattern=UUID_REGEX),
+    *,
     user: CurrentUser,
     db: DBSession,
 ) -> None:
@@ -455,6 +1010,47 @@ async def delete_draft(
 # ============================================================================
 
 
+def _extract_skills_for_ai(content: ResumeContent) -> dict:
+    """Extract skills in legacy format for AI services."""
+    technical = []
+    soft = []
+    tools = []
+    
+    for skill in content.sections.skills.items:
+        name = skill.name
+        proficiency = skill.proficiency.lower() if skill.proficiency else ""
+        
+        # Categorize based on proficiency or keywords
+        if "soft" in proficiency or any(kw.lower() in ["communication", "leadership", "teamwork"] for kw in skill.keywords):
+            soft.append(name)
+        elif "tool" in proficiency or "framework" in proficiency:
+            tools.append(name)
+        else:
+            technical.append(name)
+            # Add keywords as technical skills
+            technical.extend(skill.keywords)
+    
+    return {"technical": technical, "soft": soft, "tools": tools}
+
+
+def _extract_work_experience_for_ai(content: ResumeContent) -> list:
+    """Extract work experience in legacy format for AI services."""
+    return [
+        {
+            "company": exp.company,
+            "title": exp.title,
+            "start_date": None,  # Period is stored as string
+            "end_date": None,
+            "description": exp.description,
+            "achievements": [],  # Parse from description if needed
+            "location": exp.location,
+            "is_current": "present" in exp.period.lower() if exp.period else False,
+        }
+        for exp in content.sections.experience.items
+        if not exp.hidden
+    ]
+
+
 @router.post("/ai/summary", response_model=GenerateSummaryResponse)
 async def generate_summary(
     request: GenerateSummaryRequest,
@@ -469,26 +1065,21 @@ async def generate_summary(
     )
     ai_service = AIContentService(llm_client=llm_client)
 
-    # Convert schema to domain
+    # Convert legacy schema to domain for AI service
     work_experience = [
         WorkExperience(
             company=w.company,
             title=w.title,
-            start_date=w.start_date,
-            end_date=w.end_date,
-            description=w.description,
-            achievements=w.achievements,
-            location=w.location,
-            is_current=w.is_current,
+            description=w.description or "",
         )
         for w in request.work_experience
     ]
 
-    skills = SkillsSection(
-        technical=request.skills.technical,
-        soft=request.skills.soft,
-        tools=request.skills.tools,
-    )
+    skills = SkillsSection(items=[
+        SkillItem(name=s) for s in (
+            request.skills.technical + request.skills.soft + request.skills.tools
+        )
+    ])
 
     result = await ai_service.generate_summary(
         work_experience=work_experience,
@@ -545,11 +1136,13 @@ async def suggest_skills(
     )
     ai_service = AIContentService(llm_client=llm_client)
 
-    existing_skills = SkillsSection(
-        technical=request.existing_skills.technical,
-        soft=request.existing_skills.soft,
-        tools=request.existing_skills.tools,
-    )
+    existing_skills = SkillsSection(items=[
+        SkillItem(name=s) for s in (
+            request.existing_skills.technical + 
+            request.existing_skills.soft + 
+            request.existing_skills.tools
+        )
+    ])
 
     result = await ai_service.suggest_skills(
         job_title=request.job_title,
@@ -749,3 +1342,237 @@ async def upload_profile_picture(
         url=url,
         filename=file.filename or f"{file_id}.{file_ext}",
     )
+
+
+# ============================================================================
+# PDF Export Endpoints
+# ============================================================================
+
+
+class PrinterResumeResponse(BaseModel):
+    """Response model for internal printer endpoint."""
+
+    id: str
+    name: str
+    slug: str
+    tags: list[str]
+    data: dict[str, Any]
+    user_id: str
+    is_locked: bool
+    updated_at: datetime
+
+
+class PDFExportResponse(BaseModel):
+    """Response model for PDF export endpoint."""
+
+    url: str
+    key: str
+
+
+def content_to_reactive_resume_format(
+    content: ResumeContent,
+    draft_name: str,
+) -> dict[str, Any]:
+    """Convert ResumeContent to Reactive Resume data format for PDF printing.
+    
+    Since the new schema mirrors Reactive Resume's format, this is now a direct
+    conversion using the repository's serialization logic.
+    """
+    from app.infra.db.repositories.resume_draft import SQLResumeDraftRepository
+    
+    # Create a temporary repository instance just for serialization
+    # This is a bit of a hack, but it reuses the same serialization logic
+    class TempRepo(SQLResumeDraftRepository):
+        def __init__(self):
+            pass  # Don't need session for serialization
+    
+    repo = TempRepo()
+    return repo._content_to_dict(content)
+
+
+@router.get(
+    "/internal/printer/resume/{draft_id}",
+    response_model=PrinterResumeResponse,
+    include_in_schema=False,
+)
+async def get_resume_for_printer(
+    draft_id: str = Path(..., pattern=UUID_REGEX),
+    service_token: str = Query(..., description="Internal service token"),
+    *,
+    settings: AppSettings,
+    db: DBSession,
+) -> PrinterResumeResponse:
+    """Internal endpoint for printer service. Uses service token for auth.
+
+    This endpoint is called by Reactive Resume's printer route when
+    generating PDFs. It validates the service token and returns resume
+    data in Reactive Resume format.
+    """
+    # Verify service token
+    payload = verify_service_token(
+        token=service_token,
+        secret=settings.internal_service_secret.get_secret_value(),
+    )
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired service token",
+        )
+
+    if payload.resume_id != draft_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token/resume mismatch",
+        )
+
+    # Get draft
+    repo = SQLResumeDraftRepository(session=db)
+    draft = await repo.get_by_id(draft_id)
+
+    if not draft:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Draft not found",
+        )
+
+    # Verify ownership (token user_id must match draft owner)
+    if draft.user_id != payload.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    # Convert to Reactive Resume format
+    rr_data = content_to_reactive_resume_format(draft.content, draft.name)
+
+    logger.info(
+        "internal_printer_resume_fetched",
+        draft_id=draft_id,
+        user_id=payload.user_id,
+    )
+
+    return PrinterResumeResponse(
+        id=draft.id,
+        name=draft.name,
+        slug=draft.id,  # Use ID as slug
+        tags=[],
+        data=rr_data,
+        user_id=draft.user_id,
+        is_locked=False,
+        updated_at=draft.updated_at or draft.created_at,
+    )
+
+
+@router.post(
+    "/drafts/{draft_id}/export-pdf",
+    response_model=PDFExportResponse,
+)
+async def export_draft_as_pdf(
+    draft_id: str = Path(..., pattern=UUID_REGEX),
+    *,
+    user: CurrentUser,
+    settings: AppSettings,
+    db: DBSession,
+) -> PDFExportResponse:
+    """Export resume draft as PDF using Playwright + Reactive Resume templates.
+
+    This endpoint:
+    1. Validates user ownership of the draft
+    2. Generates secure tokens for the PDF generation service
+    3. Uses Playwright to render the resume via Reactive Resume's printer route
+    4. Uploads the generated PDF to S3
+    5. Returns the URL to the PDF
+    """
+    # Verify ownership
+    repo = SQLResumeDraftRepository(session=db)
+    draft = await repo.get_by_id(draft_id)
+
+    if not draft or draft.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Draft not found",
+        )
+
+    # Generate tokens
+    service_token = generate_service_token(
+        user_id=user.id,
+        resume_id=draft_id,
+        secret=settings.internal_service_secret.get_secret_value(),
+    )
+    printer_token = generate_printer_token(
+        resume_id=draft_id,
+        secret=settings.printer_token_secret.get_secret_value(),
+    )
+
+    # Get page metadata from content
+    page_metadata = draft.content.metadata.page
+    page_format = page_metadata.format
+    margin_x = page_metadata.margin_x
+    margin_y = page_metadata.margin_y
+
+    logger.info(
+        "pdf_export_starting",
+        draft_id=draft_id,
+        user_id=user.id,
+        page_format=page_format,
+        margin_x=margin_x,
+        margin_y=margin_y,
+    )
+
+    # Generate PDF using Playwright
+    try:
+        pdf_buffer = await generate_pdf(
+            reactive_resume_url=settings.reactive_resume_url,
+            resume_id=draft_id,
+            printer_token=printer_token,
+            service_token=service_token,
+            page_format=page_format,
+            margin_x=margin_x,
+            margin_y=margin_y,
+        )
+    except RuntimeError as e:
+        logger.error(
+            "pdf_export_failed",
+            draft_id=draft_id,
+            user_id=user.id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate PDF: {e}",
+        )
+
+    # Upload to S3
+    storage = S3Storage(
+        endpoint=settings.s3_endpoint,
+        access_key=settings.s3_access_key.get_secret_value(),
+        secret_key=settings.s3_secret_key.get_secret_value(),
+        bucket=settings.s3_bucket,
+        region=settings.s3_region,
+    )
+
+    timestamp = int(time.time() * 1000)
+    s3_key = f"uploads/{user.id}/pdfs/{draft_id}/{timestamp}.pdf"
+
+    # Upload the PDF
+    await storage.upload(
+        key=s3_key,
+        data=pdf_buffer,
+        content_type="application/pdf",
+    )
+
+    # Get a presigned URL for download (valid for 1 hour)
+    presigned_url = await storage.get_presigned_url(
+        key=s3_key,
+        expires_in=3600,
+    )
+
+    logger.info(
+        "pdf_export_completed",
+        draft_id=draft_id,
+        user_id=user.id,
+        s3_key=s3_key,
+        size_bytes=len(pdf_buffer),
+    )
+
+    return PDFExportResponse(url=presigned_url, key=s3_key)

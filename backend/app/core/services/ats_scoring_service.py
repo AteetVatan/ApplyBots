@@ -8,6 +8,8 @@ Standards: python_clean.mdc
 
 import re
 from dataclasses import dataclass, field
+from html import unescape
+from html.parser import HTMLParser
 
 import structlog
 
@@ -49,6 +51,34 @@ ACTION_VERBS = {
     "coordinated", "executed", "established", "reduced", "streamlined",
     "optimized", "collaborated", "mentored", "pioneered", "spearheaded",
 }
+
+
+class HTMLStripper(HTMLParser):
+    """Simple HTML tag stripper."""
+
+    def __init__(self):
+        super().__init__()
+        self.reset()
+        self.fed = []
+
+    def handle_data(self, data):
+        self.fed.append(data)
+
+    def get_data(self):
+        return "".join(self.fed)
+
+
+def strip_html(html: str) -> str:
+    """Strip HTML tags from text."""
+    if not html:
+        return ""
+    stripper = HTMLStripper()
+    try:
+        stripper.feed(unescape(html))
+        return stripper.get_data()
+    except Exception:
+        # Fallback to simple regex if parser fails
+        return re.sub(r"<[^>]+>", "", html)
 
 
 @dataclass
@@ -263,45 +293,77 @@ class ATSScoringService:
         """Get all text content from resume.
 
         Args:
-            content: Resume content
+            content: Resume content (new nested structure)
 
         Returns:
             Combined text from all sections
         """
         parts = []
 
-        # Summary
-        if content.professional_summary:
-            parts.append(content.professional_summary)
+        # Summary (strip HTML)
+        if content.summary and content.summary.content:
+            parts.append(strip_html(content.summary.content))
 
-        # Experience
-        for exp in content.work_experience:
-            parts.append(f"{exp.title} {exp.company}")
-            if exp.description:
-                parts.append(exp.description)
-            parts.extend(exp.achievements)
+        # Experience section
+        for exp in content.sections.experience.items:
+            if not exp.hidden:
+                parts.append(f"{exp.title} {exp.company}")
+                if exp.description:
+                    parts.append(strip_html(exp.description))
 
-        # Education
-        for edu in content.education:
-            parts.append(f"{edu.degree} {edu.institution}")
-            if edu.field_of_study:
-                parts.append(edu.field_of_study)
+        # Education section
+        for edu in content.sections.education.items:
+            if not edu.hidden:
+                parts.append(f"{edu.degree} {edu.school}")
+                if edu.area:
+                    parts.append(edu.area)
+                if edu.description:
+                    parts.append(strip_html(edu.description))
 
-        # Skills
-        parts.extend(content.skills.technical)
-        parts.extend(content.skills.soft)
-        parts.extend(content.skills.tools)
+        # Skills section
+        for skill in content.sections.skills.items:
+            if not skill.hidden:
+                parts.append(skill.name)
+                parts.extend(skill.keywords)
 
-        # Projects
-        for proj in content.projects:
-            parts.append(proj.name)
-            parts.append(proj.description)
-            parts.extend(proj.technologies)
+        # Projects section
+        for proj in content.sections.projects.items:
+            if not proj.hidden:
+                parts.append(proj.name)
+                if proj.description:
+                    parts.append(strip_html(proj.description))
 
-        # Certifications
-        for cert in content.certifications:
-            parts.append(cert.name)
-            parts.append(cert.issuer)
+        # Certifications section
+        for cert in content.sections.certifications.items:
+            if not cert.hidden:
+                parts.append(cert.title)
+                parts.append(cert.issuer)
+
+        # Awards section
+        for award in content.sections.awards.items:
+            if not award.hidden:
+                parts.append(award.title)
+                if award.description:
+                    parts.append(strip_html(award.description))
+
+        # Languages section
+        for lang in content.sections.languages.items:
+            if not lang.hidden:
+                parts.append(lang.language)
+
+        # Volunteer section
+        for vol in content.sections.volunteer.items:
+            if not vol.hidden:
+                parts.append(vol.organization)
+                if vol.description:
+                    parts.append(strip_html(vol.description))
+
+        # Publications section
+        for pub in content.sections.publications.items:
+            if not pub.hidden:
+                parts.append(pub.title)
+                if pub.description:
+                    parts.append(strip_html(pub.description))
 
         return " ".join(parts)
 
@@ -343,21 +405,22 @@ class ATSScoringService:
         points_per_section = ATS_SCORING_WEIGHTS["section_completeness"] // len(REQUIRED_SECTIONS)
 
         # Contact section (name and email required)
-        if content.full_name and content.email:
+        if content.basics.name and content.basics.email:
             score += points_per_section
 
         # Experience section
-        if content.work_experience and len(content.work_experience) > 0:
+        visible_experience = [e for e in content.sections.experience.items if not e.hidden]
+        if visible_experience:
             score += points_per_section
 
         # Education section
-        if content.education and len(content.education) > 0:
+        visible_education = [e for e in content.sections.education.items if not e.hidden]
+        if visible_education:
             score += points_per_section
 
         # Skills section
-        if content.skills and (
-            content.skills.technical or content.skills.soft or content.skills.tools
-        ):
+        visible_skills = [s for s in content.sections.skills.items if not s.hidden]
+        if visible_skills:
             score += points_per_section
 
         return score
@@ -373,30 +436,55 @@ class ATSScoringService:
         """
         max_score = ATS_SCORING_WEIGHTS["quantified_achievements"]
 
-        # Count bullet points with numbers
-        total_bullets = 0
-        quantified_bullets = 0
-        action_verb_bullets = 0
+        # Count descriptions with numbers and action verbs
+        total_items = 0
+        quantified_items = 0
+        action_verb_items = 0
 
-        for exp in content.work_experience:
-            for achievement in exp.achievements:
-                total_bullets += 1
+        # Check experience descriptions
+        for exp in content.sections.experience.items:
+            if exp.hidden:
+                continue
+            if not exp.description:
+                continue
+            
+            total_items += 1
+            text = strip_html(exp.description)
 
-                # Check for numbers
-                if re.search(r"\d+", achievement):
-                    quantified_bullets += 1
+            # Check for numbers
+            if re.search(r"\d+", text):
+                quantified_items += 1
 
-                # Check for action verbs
-                first_word = achievement.split()[0].lower() if achievement.split() else ""
+            # Check for action verbs (check first word of bullet points)
+            lines = text.split("\n")
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                first_word = line.split()[0].lower() if line.split() else ""
                 if first_word in ACTION_VERBS:
-                    action_verb_bullets += 1
+                    action_verb_items += 1
+                    break  # Count once per description
 
-        if total_bullets == 0:
+        # Also check projects
+        for proj in content.sections.projects.items:
+            if proj.hidden:
+                continue
+            if not proj.description:
+                continue
+            
+            total_items += 1
+            text = strip_html(proj.description)
+
+            if re.search(r"\d+", text):
+                quantified_items += 1
+
+        if total_items == 0:
             return 0
 
-        # Calculate score based on percentage of quantified bullets
-        quantified_rate = quantified_bullets / total_bullets
-        action_rate = action_verb_bullets / total_bullets
+        # Calculate score based on percentage of quantified items
+        quantified_rate = quantified_items / total_items
+        action_rate = action_verb_items / total_items if total_items > 0 else 0
 
         # Weight: 60% quantified, 40% action verbs
         score = int(max_score * (0.6 * quantified_rate + 0.4 * action_rate))
@@ -441,15 +529,15 @@ class ATSScoringService:
         score = 0
 
         # Essential: name and email (3 points)
-        if content.full_name:
+        if content.basics.name:
             score += 1.5
-        if content.email:
+        if content.basics.email:
             score += 1.5
 
         # Nice to have: phone and location (2 points)
-        if content.phone:
+        if content.basics.phone:
             score += 1
-        if content.location:
+        if content.basics.location:
             score += 1
 
         return min(max_score, int(score))

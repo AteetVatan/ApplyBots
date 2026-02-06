@@ -1,3 +1,8 @@
+// Load .env FIRST, before any other imports
+// This ensures process.env is populated before any module evaluation
+import { config as loadEnv } from "dotenv";
+loadEnv();
+
 import { fileURLToPath } from "node:url";
 import { lingui } from "@lingui/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";

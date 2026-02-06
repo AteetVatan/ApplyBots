@@ -96,7 +96,7 @@ async def list_available_resumes(
             source_type="draft",
             is_primary=False,
             updated_at=d.updated_at or d.created_at,
-            preview=d.content.professional_summary[:100] if d.content.professional_summary else None,
+            preview=d.content.summary.content[:100] if d.content.summary.content else None,
         )
         for d in drafts
     ]

@@ -1,6 +1,6 @@
 # ApplyBots - Setup, Installation & Debugging Guide
 
-This guide provides detailed instructions for setting up, installing, and debugging both the backend (Python/FastAPI) and frontend (Next.js) components of ApplyBots.
+This guide provides detailed instructions for setting up, installing, and debugging the backend (Python/FastAPI), frontend (Next.js), and Reactive Resume components of ApplyBots.
 
 ---
 
@@ -8,18 +8,20 @@ This guide provides detailed instructions for setting up, installing, and debugg
 
 1. [Prerequisites](#prerequisites)
 2. [Quick Start with Docker](#quick-start-with-docker)
-3. [Backend Setup](#backend-setup)
-4. [Frontend Setup](#frontend-setup)
-5. [OAuth Setup](#oauth-setup-optional)
-6. [Environment Configuration](#environment-configuration)
-7. [Running the Application](#running-the-application)
-8. [Debugging](#debugging)
-9. [Common Issues & Solutions](#common-issues--solutions)
-10. [Testing](#testing)
-11. [Code Quality](#code-quality)
-12. [API Endpoints Reference](#api-endpoints-reference)
-13. [Features Overview](#features-overview)
-14. [Next Steps](#next-steps)
+3. [Infrastructure Setup](#infrastructure-setup)
+4. [Backend Setup](#backend-setup)
+5. [Frontend Setup](#frontend-setup)
+6. [Reactive Resume Setup](#reactive-resume-setup)
+7. [OAuth Setup](#oauth-setup-optional)
+8. [Environment Configuration](#environment-configuration)
+9. [Running the Application](#running-the-application)
+10. [Debugging](#debugging)
+11. [Common Issues & Solutions](#common-issues--solutions)
+12. [Testing](#testing)
+13. [Code Quality](#code-quality)
+14. [API Endpoints Reference](#api-endpoints-reference)
+15. [Features Overview](#features-overview)
+16. [Next Steps](#next-steps)
 
 ---
 
@@ -30,10 +32,19 @@ This guide provides detailed instructions for setting up, installing, and debugg
 | Software | Version | Purpose |
 |----------|---------|---------|
 | Python | 3.11+ | Backend runtime |
-| Node.js | 20+ | Frontend runtime |
+| Node.js | 20+ | Frontend and Reactive Resume runtime |
+| pnpm | v10.28.0+ | Package manager for Reactive Resume |
 | Docker | Latest | Container services |
 | Docker Compose | v2+ | Service orchestration |
 | Git | Latest | Version control |
+
+### Installation Links
+
+- [Python](https://www.python.org/downloads/)
+- [Node.js](https://nodejs.org/)
+- [pnpm](https://pnpm.io/installation)
+- [Docker](https://docs.docker.com/get-docker/)
+- [Docker Compose](https://docs.docker.com/compose/install/)
 
 ### Recommended Tools
 
@@ -41,6 +52,20 @@ This guide provides detailed instructions for setting up, installing, and debugg
 - **Postman** or **Bruno** - API testing
 - **DBeaver** - Database management
 - **Redis Insight** - Redis debugging
+
+### Install pnpm (Required for Reactive Resume)
+
+If you haven't installed pnpm yet:
+
+```bash
+npm install -g pnpm
+```
+
+Verify installation:
+
+```bash
+pnpm --version
+```
 
 ---
 
@@ -76,7 +101,236 @@ python scripts/seed_jobs.py
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:8080
 - API Documentation: http://localhost:8080/docs
+- Reactive Resume: http://localhost:3002
 - MinIO Console: http://localhost:9001 (minioadmin/minioadmin)
+
+---
+
+## Infrastructure Setup
+
+Before setting up the backend and frontend, you need to start the infrastructure services they depend on. These services should be started first.
+
+### 1. Start PostgreSQL (Required for Backend)
+
+PostgreSQL is the primary database for the application.
+
+```bash
+# Single-line version (works in both bash and PowerShell):
+docker run -d --name ApplyBots-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ApplyBots -p 5432:5432 postgres:16-alpine
+
+# Multi-line versions:
+# Bash/Linux/macOS:
+docker run -d --name ApplyBots-postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=ApplyBots \
+  -p 5432:5432 postgres:16-alpine
+
+# PowerShell (Windows):
+docker run -d --name ApplyBots-postgres `
+  -e POSTGRES_PASSWORD=postgres `
+  -e POSTGRES_DB=ApplyBots `
+  -p 5432:5432 postgres:16-alpine
+```
+
+**Verify PostgreSQL is Running:**
+
+```bash
+docker exec ApplyBots-postgres pg_isready -U postgres
+# Should return: accepting connections
+```
+
+### 2. Start Redis (Required for Celery)
+
+Celery requires Redis as a message broker. Start Redis before starting the Celery worker:
+
+**Option A: Standalone Redis Container (Recommended for Local Development)**
+
+```bash
+# Start Redis container
+docker run -d --name ApplyBots-redis -p 6379:6379 redis:7-alpine
+
+# Verify Redis is running
+docker ps | grep redis
+# Or on Windows PowerShell:
+docker ps | Select-String redis
+
+# Test Redis connection
+docker exec ApplyBots-redis redis-cli ping
+# Should return: PONG
+```
+
+**Option B: Docker Compose (All Services)**
+
+```bash
+# Start all services including Redis
+make dev-up
+# or
+docker compose -f docker/docker-compose.yml up -d
+```
+
+**Managing Redis Container:**
+
+```bash
+# Start Redis (if stopped)
+docker start ApplyBots-redis
+
+# Stop Redis
+docker stop ApplyBots-redis
+
+# Remove Redis container (if needed)
+docker rm ApplyBots-redis
+
+# View Redis logs
+docker logs ApplyBots-redis
+```
+
+**Note:** The container name `ApplyBots-redis` is used consistently across all documentation. If using Docker Compose, the container is automatically named `ApplyBots-redis`.
+
+### 3. Start MinIO (Required for File Uploads)
+
+MinIO provides S3-compatible object storage for resume uploads and other files.
+
+**Option A: Standalone MinIO Container (Recommended for Local Development)**
+
+```bash
+# Start MinIO container
+docker run -d --name ApplyBots-minio \
+  -e MINIO_ROOT_USER=minioadmin \
+  -e MINIO_ROOT_PASSWORD=minioadmin \
+  -p 9000:9000 \
+  -p 9001:9001 \
+  minio/minio:latest server /data --console-address ":9001"
+
+# PowerShell (Windows):
+docker run -d --name ApplyBots-minio `
+  -e MINIO_ROOT_USER=minioadmin `
+  -e MINIO_ROOT_PASSWORD=minioadmin `
+  -p 9000:9000 `
+  -p 9001:9001 `
+  minio/minio:latest server /data --console-address ":9001"
+
+# Single-line version (works in both bash and PowerShell):
+docker run -d --name ApplyBots-minio -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin -p 9000:9000 -p 9001:9001 minio/minio:latest server /data --console-address ":9001"
+```
+
+**Create the Storage Bucket (REQUIRED):**
+
+```bash
+# Create the bucket using MinIO client (mc)
+docker exec ApplyBots-minio /bin/sh -c "mc alias set local http://localhost:9000 minioadmin minioadmin && mc mb local/applybots --ignore-existing"
+
+# Should output: Bucket created successfully `local/applybots`.
+```
+
+> **Important:** S3 bucket names MUST be lowercase. The bucket name is `applybots` (not `ApplyBots`).
+
+**Option B: Docker Compose (All Services)**
+
+```bash
+# Start all services including MinIO
+make dev-up
+# or
+docker compose -f docker/docker-compose.yml up -d minio
+
+# Then create the bucket
+docker exec ApplyBots-minio /bin/sh -c "mc alias set local http://localhost:9000 minioadmin minioadmin && mc mb local/applybots --ignore-existing"
+```
+
+**Managing MinIO Container:**
+
+```bash
+# Start MinIO (if stopped)
+docker start ApplyBots-minio
+
+# Stop MinIO
+docker stop ApplyBots-minio
+
+# Remove MinIO container (if needed)
+docker rm ApplyBots-minio
+
+# View MinIO logs
+docker logs ApplyBots-minio
+
+# Access MinIO Console (Web UI)
+# URL: http://localhost:9001
+# Username: minioadmin
+# Password: minioadmin
+```
+
+**Verify MinIO is Running:**
+
+```bash
+# Check container is running
+docker ps | grep minio
+# Or on Windows PowerShell:
+docker ps | Select-String minio
+
+# Test API endpoint
+curl http://localhost:9000/minio/health/live
+# Should return: healthy
+```
+
+### 4. Start Browserless (Required for Reactive Resume PDF Generation)
+
+Browserless is used by Reactive Resume for PDF/screenshot generation.
+
+**Option A: Standalone Container**
+
+```bash
+# Start Browserless container
+docker run -d --name ApplyBots-browserless \
+  -p 4000:3000 \
+  -e CONNECTION_TIMEOUT=60000 \
+  -e MAX_CONCURRENT_SESSIONS=10 \
+  browserless/chrome:latest
+
+# PowerShell (Windows):
+docker run -d --name ApplyBots-browserless `
+  -p 4000:3000 `
+  -e CONNECTION_TIMEOUT=60000 `
+  -e MAX_CONCURRENT_SESSIONS=10 `
+  browserless/chrome:latest
+
+# Single-line version (works in both bash and PowerShell):
+docker run -d --name ApplyBots-browserless -p 4000:3000 -e CONNECTION_TIMEOUT=60000 -e MAX_CONCURRENT_SESSIONS=10 browserless/chrome:latest
+```
+
+**Option B: Docker Compose (Reactive Resume Services)**
+
+```bash
+# Start Browserless using Reactive Resume compose file
+cd reactive-resume
+docker compose -f compose.dev.yml up -d browserless
+cd ..
+```
+
+**Managing Browserless Container:**
+
+```bash
+# Start Browserless (if stopped)
+docker start ApplyBots-browserless
+
+# Stop Browserless
+docker stop ApplyBots-browserless
+
+# Remove Browserless container (if needed)
+docker rm ApplyBots-browserless
+
+# View Browserless logs
+docker logs ApplyBots-browserless
+```
+
+**Verify Browserless is Running:**
+
+```bash
+# Check container is running
+docker ps | grep browserless
+# Or on Windows PowerShell:
+docker ps | Select-String browserless
+
+# Test WebSocket endpoint (should connect)
+curl http://localhost:4000
+```
 
 ---
 
@@ -256,24 +510,9 @@ RATE_LIMIT_WINDOW_SECONDS=60
 
 #### 4. Database Setup
 
+> **Note:** Ensure PostgreSQL is already running (see [Infrastructure Setup](#infrastructure-setup) section above).
+
 ```bash
-# Ensure PostgreSQL is running (via Docker or local)
-# Single-line version (works in both bash and PowerShell):
-docker run -d --name ApplyBots-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ApplyBots -p 5432:5432 postgres:16-alpine
-
-# Multi-line versions:
-# Bash/Linux/macOS:
-docker run -d --name ApplyBots-postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=ApplyBots \
-  -p 5432:5432 postgres:16-alpine
-
-# PowerShell (Windows):
-docker run -d --name ApplyBots-postgres `
-  -e POSTGRES_PASSWORD=postgres `
-  -e POSTGRES_DB=ApplyBots `
-  -p 5432:5432 postgres:16-alpine
-
 # Run migrations (REQUIRED before seeding)
 cd backend
 
@@ -286,10 +525,12 @@ alembic revision --autogenerate -m "Initial migration"
 cd ..
 
 # (Optional) Seed sample jobs (only after migrations are complete)
-python ../scripts/seed_jobs.py
+python scripts/seed_jobs.py
 ```
 
 #### 5. Start Backend Server
+
+> **Note:** Ensure PostgreSQL, Redis, and MinIO are already running (see [Infrastructure Setup](#infrastructure-setup) section above).
 
 ```bash
 # Development with auto-reload
@@ -300,138 +541,7 @@ cd ..
 make backend
 ```
 
-#### 6. Start Redis (Required for Celery)
-
-Celery requires Redis as a message broker. Start Redis before starting the Celery worker:
-
-**Option A: Standalone Redis Container (Recommended for Local Development)**
-
-```bash
-# Start Redis container
-docker run -d --name ApplyBots-redis -p 6379:6379 redis:7-alpine
-
-# Verify Redis is running
-docker ps | grep redis
-# Or on Windows PowerShell:
-docker ps | Select-String redis
-
-# Test Redis connection
-docker exec ApplyBots-redis redis-cli ping
-# Should return: PONG
-```
-
-**Option B: Docker Compose (All Services)**
-
-```bash
-# Start all services including Redis
-make dev-up
-# or
-docker compose -f docker/docker-compose.yml up -d
-```
-
-**Managing Redis Container:**
-
-```bash
-# Start Redis (if stopped)
-docker start ApplyBots-redis
-
-# Stop Redis
-docker stop ApplyBots-redis
-
-# Remove Redis container (if needed)
-docker rm ApplyBots-redis
-
-# View Redis logs
-docker logs ApplyBots-redis
-```
-
-**Note:** The container name `ApplyBots-redis` is used consistently across all documentation. If using Docker Compose, the container is automatically named `ApplyBots-redis`.
-
-#### 7. Start MinIO (Required for File Uploads)
-
-MinIO provides S3-compatible object storage for resume uploads and other files.
-
-**Option A: Standalone MinIO Container (Recommended for Local Development)**
-
-```bash
-# Start MinIO container
-docker run -d --name ApplyBots-minio \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=minioadmin \
-  -p 9000:9000 \
-  -p 9001:9001 \
-  minio/minio:latest server /data --console-address ":9001"
-
-# PowerShell (Windows):
-docker run -d --name ApplyBots-minio `
-  -e MINIO_ROOT_USER=minioadmin `
-  -e MINIO_ROOT_PASSWORD=minioadmin `
-  -p 9000:9000 `
-  -p 9001:9001 `
-  minio/minio:latest server /data --console-address ":9001"
-
-# Single-line version (works in both bash and PowerShell):
-docker run -d --name ApplyBots-minio -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin -p 9000:9000 -p 9001:9001 minio/minio:latest server /data --console-address ":9001"
-```
-
-**Create the Storage Bucket (REQUIRED):**
-
-```bash
-# Create the bucket using MinIO client (mc)
-docker exec ApplyBots-minio /bin/sh -c "mc alias set local http://localhost:9000 minioadmin minioadmin && mc mb local/applybots --ignore-existing"
-
-# Should output: Bucket created successfully `local/applybots`.
-```
-
-> **Important:** S3 bucket names MUST be lowercase. The bucket name is `applybots` (not `ApplyBots`).
-
-**Option B: Docker Compose (All Services)**
-
-```bash
-# Start all services including MinIO
-make dev-up
-# or
-docker compose -f docker/docker-compose.yml up -d minio
-
-# Then create the bucket
-docker exec ApplyBots-minio /bin/sh -c "mc alias set local http://localhost:9000 minioadmin minioadmin && mc mb local/applybots --ignore-existing"
-```
-
-**Managing MinIO Container:**
-
-```bash
-# Start MinIO (if stopped)
-docker start ApplyBots-minio
-
-# Stop MinIO
-docker stop ApplyBots-minio
-
-# Remove MinIO container (if needed)
-docker rm ApplyBots-minio
-
-# View MinIO logs
-docker logs ApplyBots-minio
-
-# Access MinIO Console (Web UI)
-# URL: http://localhost:9001
-# Username: minioadmin
-# Password: minioadmin
-```
-
-**Verify MinIO is Running:**
-
-```bash
-# Check container is running
-docker ps | grep minio
-# Or on Windows PowerShell:
-docker ps | Select-String minio
-
-# Test API endpoint
-curl http://localhost:9000/minio/health/live
-# Should return: healthy
-```
-
-#### 8. Start Celery Worker (Optional)
+#### 6. Start Celery Worker (Optional)
 
 **Important for Windows Users:** Celery is automatically configured to use the `solo` pool on Windows to avoid multiprocessing issues. This is handled automatically by the configuration.
 
@@ -480,10 +590,12 @@ docker exec ApplyBots-postgres pg_isready -U postgres
 |---------|------|------------|---------|
 | Backend API | 8080 | http://localhost:8080/docs | FastAPI server |
 | Frontend | 3000 | http://localhost:3000 | Next.js app |
+| Reactive Resume | 3002 | http://localhost:3002 | Resume builder app |
 | PostgreSQL | 5432 | - | Primary database |
 | Redis | 6379 | - | Cache, queue broker |
 | MinIO API | 9000 | - | Object storage API |
 | MinIO Console | 9001 | http://localhost:9001 | Storage management UI |
+| Browserless | 4000 | - | PDF/screenshot generation |
 | ChromaDB | 8000 | - | Vector database |
 | Prometheus | 9090 | http://localhost:9090 | Metrics (optional) |
 | Grafana | 3001 | http://localhost:3001 | Monitoring (optional) |
@@ -551,6 +663,138 @@ make frontend
 ### Verify Frontend is Running
 
 Open http://localhost:3000 in your browser.
+
+---
+
+## Reactive Resume Setup
+
+> **Note:** Reactive Resume is an AI-powered resume builder integrated into ApplyBots. It uses the FastAPI backend for data storage and requires Browserless for PDF generation.
+
+### Option A: Docker (Recommended)
+
+Reactive Resume can be started with Docker if configured in your docker-compose setup.
+
+### Option B: Local Development
+
+#### 1. Install Dependencies
+
+Navigate to the reactive-resume directory and install dependencies:
+
+```bash
+cd reactive-resume
+pnpm install
+```
+
+This will install all required packages defined in `package.json`.
+
+#### 2. Configure Environment
+
+Create a `.env` file in the `reactive-resume` directory root with the following configuration:
+
+```env
+# Server Configuration
+APP_URL=http://localhost:3002
+
+# Printer Configuration (required for PDF generation)
+# Note: PRINTER_APP_URL uses host.docker.internal to allow Docker containers
+# to access services running on your host machine
+PRINTER_APP_URL=http://host.docker.internal:3002
+PRINTER_ENDPOINT=ws://localhost:4000?token=1234567890
+
+# Note: File storage (profile pictures, screenshots, PDFs) is handled by the backend API.
+# No S3 configuration is needed in reactive-resume. The backend manages all storage operations.
+```
+
+**Environment Variables Explained:**
+
+- **APP_URL**: The base URL where your application will be accessible
+- **PRINTER_APP_URL**: Required when running the app outside Docker while printer is in Docker. Uses `host.docker.internal` to allow Docker containers to reach your host machine
+- **PRINTER_ENDPOINT**: WebSocket endpoint for the PDF generation service (Browserless)
+- **Note**: This application uses FastAPI backend for data storage. No local database setup is required.
+- **Storage**: File storage (profile pictures, screenshots, PDFs) is handled by the backend API. No S3 configuration needed in reactive-resume.
+
+#### 3. Start Infrastructure Services (Browserless)
+
+> **Note:** Ensure Browserless is already running (see [Infrastructure Setup](#infrastructure-setup) section above).
+
+If Browserless is not running, start it:
+
+```bash
+# Option A: Using Reactive Resume compose file
+cd reactive-resume
+docker compose -f compose.dev.yml up -d browserless
+cd ..
+
+# Option B: Standalone container (see Infrastructure Setup section)
+```
+
+#### 4. Start Development Server
+
+> **Important**: Make sure your FastAPI backend is running and accessible. The application will communicate with the FastAPI backend for all data operations.
+
+Start the development server with hot reload:
+
+```bash
+cd reactive-resume
+pnpm run dev
+```
+
+The application will be available at **http://localhost:3002**
+
+You should see output indicating the server is running and ready.
+
+#### 5. Available Scripts
+
+| Script | Description |
+|--------|-------------|
+| `pnpm run dev` | Start development server with hot reload |
+| `pnpm run build` | Build the application for production |
+| `pnpm run start` | Start the production server |
+| `pnpm run preview` | Preview the production build locally |
+| `pnpm run lint` | Run Biome linter and formatter |
+| `pnpm run typecheck` | Run TypeScript type checking |
+| `pnpm run lingui:extract` | Extract translatable strings from code |
+
+### Port Configuration
+
+All services in the ApplyBots ecosystem use unique ports to avoid conflicts:
+
+| Service | Port | Purpose | Configuration File |
+|---------|------|---------|-------------------|
+| **Frontend (Next.js)** | 3000 | Main application UI | `frontend/package.json` (Next.js default) |
+| **Reactive Resume** | 3002 | Resume builder application | `reactive-resume/vite.config.ts` |
+| **Backend (FastAPI)** | 8080 | API server | `backend/debug.py` |
+| **Browserless** | 4000 | PDF/screenshot generation | `reactive-resume/compose.dev.yml` |
+
+**Port Overrides:**
+
+You can override the Reactive Resume URL in the frontend using environment variables:
+
+- **Frontend**: Set `NEXT_PUBLIC_REACTIVE_RESUME_URL` in `frontend/.env.local`
+  - Default: `http://localhost:3002`
+  - Example: `NEXT_PUBLIC_REACTIVE_RESUME_URL=http://localhost:3002`
+
+- **Reactive Resume**: Change port in `vite.config.ts` and update:
+  - `APP_URL` in `reactive-resume/.env`
+  - `PRINTER_APP_URL` in `reactive-resume/.env` (if using Docker)
+
+**Port Verification:**
+
+To verify ports are unique and not in use:
+
+```bash
+# Windows PowerShell
+Get-NetTCPConnection -LocalPort 3000,3002,8080,4000 | Select-Object LocalPort,OwningProcess
+
+# Linux/Mac
+lsof -i :3000 -i :3002 -i :8080 -i :4000
+```
+
+### Verify Reactive Resume is Running
+
+Open http://localhost:3002 in your browser.
+
+**Important**: The application requires the FastAPI backend to be running. All resume data is stored in the FastAPI backend database, and the application communicates with `/api/v1/resume-builder/drafts` endpoints.
 
 ---
 
@@ -775,12 +1019,14 @@ make dev-rebuild
 |---------|---------|------|
 | Backend API | `make backend` | 8080 |
 | Frontend | `make frontend` | 3000 |
+| Reactive Resume | `cd reactive-resume && pnpm run dev` | 3002 |
 | Celery Worker | `make worker` | - |
 | Celery Worker (Windows) | `make worker-windows` | - |
 | Celery Beat | `make worker-beat` | - |
-| MinIO | `docker start ApplyBots-minio` | 9000, 9001 |
 | PostgreSQL | `docker start ApplyBots-postgres` | 5432 |
 | Redis | `docker start ApplyBots-redis` | 6379 |
+| MinIO | `docker start ApplyBots-minio` | 9000, 9001 |
+| Browserless | `docker start ApplyBots-browserless` | 4000 |
 
 ### All Available Makefile Commands
 
@@ -1349,6 +1595,104 @@ Hydration failed because the initial UI does not match
 - Ensure server and client render the same content
 - Check for browser-only code (use `useEffect` or dynamic imports)
 
+### Reactive Resume Issues
+
+#### 1. Port Already in Use
+
+**Error**: Port 3002 (or another port) is already in use.
+
+**Solution**: 
+- Stop the process using the port, or
+- Change the port in `reactive-resume/vite.config.ts`:
+  ```typescript
+  server: {
+    port: 3003, // Change to available port
+    // ...
+  }
+  ```
+- Update `APP_URL` and `PRINTER_APP_URL` in `reactive-resume/.env` accordingly
+
+#### 2. FastAPI Backend Connection Issues
+
+**Error**: Cannot connect to FastAPI backend.
+
+**Solutions:**
+1. Verify FastAPI backend is running and accessible
+2. Check `NEXT_PUBLIC_API_URL` environment variable is set correctly (if used)
+3. Verify network connectivity to the backend URL
+4. Check backend logs for errors
+
+#### 3. Storage Errors
+
+**Error**: Storage operations failing.
+
+**Solutions:**
+1. Verify backend is running and accessible
+2. Check backend storage health endpoint:
+   ```bash
+   curl http://localhost:8080/api/v1/storage/health
+   ```
+3. Ensure backend S3 configuration is correct (check backend `.env` file)
+4. Check backend logs for storage-related errors
+
+#### 4. Peer Dependency Warnings
+
+**Error**: Warnings about unmet peer dependencies (e.g., `zod@^3.23.8` or `rollup@^4`).
+
+**Note**: These warnings have been resolved using pnpm overrides in `package.json`. The project uses:
+- `zod@^4.3.6` (with zod v4 features like `z.looseObject()` and `flattenError()`)
+- `rolldown-vite@latest` (which provides rollup 2.x)
+
+The overrides ensure compatibility between packages that have different peer dependency requirements.
+
+**Solutions:**
+1. If you see peer dependency warnings after pulling changes, ensure `package.json` contains the pnpm overrides section
+2. Reinstall dependencies:
+   ```bash
+   cd reactive-resume
+   pnpm install
+   ```
+
+#### 5. Type Errors After Pulling Changes
+
+**Error**: TypeScript errors after updating code.
+
+**Solutions:**
+1. The route tree may need regeneration. Start the dev server (auto-generates routes):
+   ```bash
+   cd reactive-resume
+   pnpm run dev
+   ```
+
+2. Run type checking to see specific errors:
+   ```bash
+   pnpm run typecheck
+   ```
+
+3. Reinstall dependencies if needed:
+   ```bash
+   pnpm install
+   ```
+
+#### 6. Printer/PDF Generation Not Working
+
+**Error**: PDF export fails or times out.
+
+**Solutions:**
+1. Verify Browserless is running:
+   ```bash
+   docker ps | grep browserless
+   # Or on Windows PowerShell:
+   docker ps | Select-String browserless
+   ```
+
+2. Check `PRINTER_ENDPOINT` in `reactive-resume/.env` matches the Browserless configuration
+3. Ensure `PRINTER_APP_URL` is set correctly (use `host.docker.internal` for local dev)
+4. Check Browserless logs:
+   ```bash
+   docker logs ApplyBots-browserless
+   ```
+
 ### Docker Issues
 
 #### 1. Port Already in Use
@@ -1558,12 +1902,15 @@ After setup is complete:
 1. **Create an account** at http://localhost:3000/signup (or use Google/GitHub OAuth)
 2. **Upload a resume** in the Resumes section (requires MinIO to be running)
    - You can manage multiple resumes and set a primary one
-3. **Complete your profile** in the Profile section
+3. **Use Reactive Resume** at http://localhost:3002 to create and edit resumes
+   - All resume data is stored in the FastAPI backend
+   - Export resumes to PDF (requires Browserless to be running)
+4. **Complete your profile** in the Profile section
    - Add preferences like target roles, locations, and negative keywords
-4. **Browse jobs** to see match scores based on your resume
-5. **Try the AI chat** to interact with agents for job searching and applications
-6. **Create applications** - AI generates cover letters and answers screening questions
-7. **Use Career Tools** - Practice interviews, analyze offers, and plan your career path
+5. **Browse jobs** to see match scores based on your resume
+6. **Try the AI chat** to interact with agents for job searching and applications
+7. **Create applications** - AI generates cover letters and answers screening questions
+8. **Use Career Tools** - Practice interviews, analyze offers, and plan your career path
 
 ### Quick Service Status Check
 
@@ -1574,9 +1921,10 @@ Before using the application, ensure all services are running:
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 # Expected output should show:
-# ApplyBots-postgres   Up ...   0.0.0.0:5432->5432/tcp
-# ApplyBots-redis      Up ...   0.0.0.0:6379->6379/tcp
-# ApplyBots-minio      Up ...   0.0.0.0:9000-9001->9000-9001/tcp
+# ApplyBots-postgres      Up ...   0.0.0.0:5432->5432/tcp
+# ApplyBots-redis         Up ...   0.0.0.0:6379->6379/tcp
+# ApplyBots-minio         Up ...   0.0.0.0:9000-9001->9000-9001/tcp
+# ApplyBots-browserless   Up ...   0.0.0.0:4000->3000/tcp
 ```
 
 Happy coding! 🚀

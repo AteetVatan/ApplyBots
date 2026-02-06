@@ -14,6 +14,9 @@ export const env = createEnv({
 		APP_URL: z.url({ protocol: /https?/ }),
 		PRINTER_APP_URL: z.url({ protocol: /https?/ }).optional(),
 
+		// Authentication - REQUIRED for printer token verification
+		AUTH_SECRET: z.string().min(32),
+
 		// Printer
 		PRINTER_ENDPOINT: z.url({ protocol: /^(wss?|https?)$/ }),
 
@@ -21,5 +24,9 @@ export const env = createEnv({
 
 		// Feature Flags
 		FLAG_DEBUG_PRINTER: z.stringbool().default(false),
+
+		// Internal service authentication (for PDF generation)
+		INTERNAL_SERVICE_SECRET: z.string().optional(),
+		FASTAPI_INTERNAL_URL: z.url({ protocol: /https?/ }).optional(),
 	},
 });

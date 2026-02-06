@@ -121,9 +121,12 @@ export const resumeRouter = {
 
 	getByIdForPrinter: serverOnlyProcedure
 		.route({ tags: ["Internal"], summary: "Get resume by ID for printer" })
-		.input(z.object({ id: z.string() }))
+		.input(z.object({ id: z.string(), serviceToken: z.string().optional() }))
 		.handler(async ({ input }) => {
-			return await resumeService.getByIdForPrinter({ id: input.id });
+			return await resumeService.getByIdForPrinter({
+				id: input.id,
+				serviceToken: input.serviceToken,
+			});
 		}),
 
 	getBySlug: publicProcedure

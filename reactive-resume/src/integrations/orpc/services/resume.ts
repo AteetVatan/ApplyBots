@@ -2,10 +2,20 @@ import { ORPCError } from "@orpc/client";
 import { match } from "ts-pattern";
 import type { ResumeData } from "@/schema/resume/data";
 import { defaultResumeData } from "@/schema/resume/data";
-import { env } from "@/utils/env";
 import type { Locale } from "@/utils/locale";
 import { getAPIClient } from "@/lib/api-client";
 import { getStorageService } from "./storage";
+
+interface PrinterResumeResponse {
+	id: string;
+	name: string;
+	slug: string;
+	tags: string[];
+	data: ResumeData;
+	user_id: string;
+	is_locked: boolean;
+	updated_at: string;
+}
 
 const tags = {
 	list: async (input: { userId: string }): Promise<string[]> => {
@@ -104,12 +114,66 @@ export const resumeService = {
 		}
 	},
 
-	getByIdForPrinter: async (input: { id: string }) => {
-		const apiClient = getAPIClient();
+	getByIdForPrinter: async (input: { id: string; serviceToken?: string }) => {
+		// If service token is provided, use internal FastAPI endpoint
+		// This path is used during PDF generation from FastAPI's Playwright
+		// Dynamically import env to ensure it only runs on server
+		const { env } = await import("@/utils/env");
 		
+		if (input.serviceToken && env.FASTAPI_INTERNAL_URL) {
+			try {
+				const response = await fetch(
+					`${env.FASTAPI_INTERNAL_URL}/api/v1/resume-builder/internal/printer/resume/${input.id}?service_token=${encodeURIComponent(input.serviceToken)}`,
+				);
+
+				if (!response.ok) {
+					if (response.status === 404) {
+						throw new ORPCError("NOT_FOUND");
+					}
+					throw new Error(`Internal API error: ${response.status}`);
+				}
+
+				const data = (await response.json()) as PrinterResumeResponse;
+
+				// Convert picture URL to base64 if available
+				try {
+					if (data.data.picture?.url && !data.data.picture.url.startsWith("data:")) {
+						const pictureUrl = data.data.picture.url;
+						const base64 = await fetch(pictureUrl)
+							.then((res) => res.arrayBuffer())
+							.then((buffer) => Buffer.from(buffer).toString("base64"));
+
+						data.data.picture.url = `data:image/jpeg;base64,${base64}`;
+					}
+				} catch {
+					// Ignore errors, as the picture is not always available
+				}
+
+				return {
+					id: data.id,
+					name: data.name,
+					slug: data.slug,
+					tags: data.tags,
+					data: data.data,
+					userId: data.user_id, // Now properly populated from service token!
+					isLocked: data.is_locked,
+					updatedAt: new Date(data.updated_at),
+				};
+			} catch (error) {
+				if (error instanceof ORPCError) {
+					throw error;
+				}
+				console.error("Internal API error:", error);
+				throw new ORPCError("NOT_FOUND");
+			}
+		}
+
+		// Fallback: Use regular API client (for non-PDF generation calls)
+		const apiClient = getAPIClient();
+
 		try {
 			const resume = await apiClient.getById(input.id);
-			
+
 			// Convert picture URL to base64 if available
 			try {
 				if (resume.data.picture?.url) {
@@ -117,7 +181,7 @@ export const resumeService = {
 					const base64 = await fetch(url)
 						.then((res) => res.arrayBuffer())
 						.then((buffer) => Buffer.from(buffer).toString("base64"));
-					
+
 					resume.data.picture.url = `data:image/jpeg;base64,${base64}`;
 				}
 			} catch {

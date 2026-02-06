@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     # Frontend URL (for Playwright PDF rendering)
     frontend_url: str = "http://localhost:3000"
 
+    # Reactive Resume Integration (PDF Generation)
+    reactive_resume_url: str = "http://localhost:3002"
+    internal_service_secret: SecretStr = SecretStr("")
+    printer_token_secret: SecretStr = SecretStr("")
+
     # Feature Flags
     feature_company_intel: bool = True
     feature_gamification: bool = True
