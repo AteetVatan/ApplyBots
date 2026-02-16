@@ -7,11 +7,13 @@ Standards: python_clean.mdc
 
 from contextlib import asynccontextmanager
 from logging import DEBUG, INFO
-from typing import AsyncGenerator, Callable
+from typing import Any, AsyncGenerator, Callable
 
 import structlog
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -113,6 +115,35 @@ class OptionsMiddleware:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager for startup/shutdown."""
     logger.info("application_startup", app_name=settings.app_name, env=settings.app_env)
+
+    # Check extraction dependencies at startup
+    try:
+        from app.infra.services.resume_service import ResumeService
+
+        service = ResumeService(
+            storage=None,  # type: ignore[arg-type]
+            resume_repository=None,  # type: ignore[arg-type]
+        )
+        deps = service._check_extraction_dependencies()
+
+        missing_deps = []
+        if not deps.get("pypdfium2"):
+            missing_deps.append("pypdfium2")
+        if not deps.get("ocrmypdf"):
+            missing_deps.append("ocrmypdf (requires: pip install ocrmypdf + tesseract + ghostscript)")
+
+        if missing_deps:
+            logger.warning(
+                "extraction_dependencies_missing",
+                missing=missing_deps,
+                available=deps,
+                message="Some extraction dependencies are missing. OCR fallbacks may not work.",
+            )
+        else:
+            logger.info("extraction_dependencies_available", all_deps_available=True, deps=deps)
+    except Exception as e:
+        logger.warning("extraction_dependency_check_failed", error=str(e))
+
     yield
     logger.info("application_shutdown")
 
@@ -145,7 +176,63 @@ app.add_middleware(OptionsMiddleware)
 app.include_router(api_router, prefix="/api/v1")
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Handle request validation errors."""
+    logger.warning(
+        "validation_error",
+        path=request.url.path,
+        errors=exc.errors(),
+    )
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors()},
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Handle all unhandled exceptions."""
+    logger.error(
+        "unhandled_exception",
+        path=request.url.path,
+        method=request.method,
+        error=str(exc),
+        error_type=type(exc).__name__,
+        exc_info=True,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": "Internal server error"
+            if not settings.debug
+            else f"Internal server error: {str(exc)}"
+        },
+    )
+
+
 @app.get("/health")
-async def health_check() -> dict[str, str]:
-    """Health check endpoint."""
-    return {"status": "healthy", "version": "0.1.0"}
+async def health_check() -> dict[str, Any]:
+    """Health check endpoint with extraction dependencies."""
+    from app.infra.services.resume_service import ResumeService
+
+    # Check extraction dependencies
+    # Create a minimal service instance just for dependency checking
+    # (storage and repo not needed for dependency checks)
+    service = ResumeService(
+        storage=None,  # type: ignore[arg-type]
+        resume_repository=None,  # type: ignore[arg-type]
+    )
+    deps = service._check_extraction_dependencies()
+
+    return {
+        "status": "healthy",
+        "version": "0.1.0",
+        "extraction": {
+            "poppler": deps.get("poppler", False),
+            "tesseract": deps.get("tesseract", False),
+            "pdf2image": deps.get("pdf2image", False),
+        },
+    }

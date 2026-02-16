@@ -104,6 +104,7 @@ class ResumeModel(Base):
     parsed_data: Mapped[Optional[dict]] = mapped_column(JSON)
     embedding: Mapped[Optional[List[float]]] = mapped_column(ARRAY(Float))
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    extraction_error: Mapped[Optional[str]] = mapped_column(Text)  # Error message if text extraction failed
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships

@@ -1,10 +1,7 @@
 ---
-description: "React/Next.js clean-code"
-globs: ["**/*.{ts,tsx,js,jsx}"]
-alwaysApply: true
-priority: 10
+trigger: glob
+globs: **/*.ts, **/*.tsx, **/*.js, **/*.jsx, **/*.mjs, **/*.css
 ---
--
 
 - Arch: Feature-based folders; components/ui/hooks/lib separation. Next.js: App Router; Server Components by default; Client Components only when needed.
 - Types: TypeScript strict mode; no `any`; use interfaces for props; Zod for runtime validation. Props: explicit types; no inline objects for complex props.

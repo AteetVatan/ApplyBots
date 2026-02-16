@@ -83,16 +83,16 @@ async def login(
     from app.infra.auth.service import AuthService
     from app.infra.db.repositories.user import SQLUserRepository
 
-    user_repo = SQLUserRepository(session=db)
-    auth_service = AuthService(
-        user_repository=user_repo,
-        secret_key=settings.jwt_secret_key.get_secret_value(),
-        algorithm=settings.jwt_algorithm,
-        access_expire_minutes=settings.access_token_expire_minutes,
-        refresh_expire_days=settings.refresh_token_expire_days,
-    )
-
     try:
+        user_repo = SQLUserRepository(session=db)
+        auth_service = AuthService(
+            user_repository=user_repo,
+            secret_key=settings.jwt_secret_key.get_secret_value(),
+            algorithm=settings.jwt_algorithm,
+            access_expire_minutes=settings.access_token_expire_minutes,
+            refresh_expire_days=settings.refresh_token_expire_days,
+        )
+
         tokens = await auth_service.login(
             email=request.email,
             password=request.password,
@@ -108,9 +108,22 @@ async def login(
         )
 
     except InvalidCredentialsError:
+        logger.warning("login_failed", email=request.email, reason="invalid_credentials")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
+        )
+    except Exception as e:
+        logger.error(
+            "login_error",
+            email=request.email,
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during login. Please try again later.",
         )
 
 

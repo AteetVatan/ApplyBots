@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Upload, FileText, Loader2, Check, Trash2 } from "lucide-react";
+import { api, type Resume } from "@/lib/api";
 
 interface ProfileData {
   id: string;
@@ -15,23 +16,13 @@ interface ProfileData {
   portfolio_url: string | null;
 }
 
-interface ResumeData {
-  id: string;
-  filename: string;
-  is_primary: boolean;
-  created_at: string;
-}
-
 export default function ProfilePage() {
   const queryClient = useQueryClient();
   const [fullName, setFullName] = useState("");
   const [headline, setHeadline] = useState("");
   const [location, setLocation] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [deletingResumeId, setDeletingResumeId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Fetch existing profile data
@@ -50,19 +41,11 @@ export default function ProfilePage() {
   });
 
   // Fetch existing resumes
-  const { data: resumes } = useQuery<ResumeData[]>({
+  const { data: resumeData } = useQuery({
     queryKey: ["resumes"],
-    queryFn: async () => {
-      const token = localStorage.getItem("ApplyBots_access_token");
-      const response = await fetch("/api/v1/profile/resumes", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error("Failed to fetch resumes");
-      }
-      return response.json();
-    },
+    queryFn: () => api.getResumes(),
   });
+  const resumes = resumeData?.items || [];
 
   // Populate form when profile loads
   useEffect(() => {
@@ -73,58 +56,42 @@ export default function ProfilePage() {
     }
   }, [profile]);
 
+  // Upload mutation
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => api.uploadResume(file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["resumes"] });
+    },
+    onError: (err: Error) => {
+      // Error handling is done via mutation state
+      console.error("Upload failed:", err);
+    },
+  });
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setUploading(true);
-    setUploadError(null);
+    uploadMutation.mutate(file);
 
-    try {
-      const token = localStorage.getItem("ApplyBots_access_token");
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch("/api/v1/profile/resumes", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
-
-      if (response.ok) {
-        queryClient.invalidateQueries({ queryKey: ["resumes"] });
-      } else {
-        setUploadError("Upload failed. Please try again.");
-      }
-    } catch {
-      setUploadError("Upload failed. Please try again.");
-    } finally {
-      setUploading(false);
-    }
+    // Reset input
+    e.target.value = "";
   };
 
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteResume(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["resumes"] });
+    },
+    onError: (err: Error) => {
+      // Error handling - could add error state if needed
+      console.error("Delete failed:", err);
+    },
+  });
+
   const handleDeleteResume = async (resumeId: string) => {
-    setDeletingResumeId(resumeId);
-
-    try {
-      const token = localStorage.getItem("ApplyBots_access_token");
-      const response = await fetch(`/api/v1/profile/resumes/${resumeId}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        queryClient.invalidateQueries({ queryKey: ["resumes"] });
-      }
-    } catch {
-      // Silently fail - could add error state if needed
-    } finally {
-      setDeletingResumeId(null);
-    }
+    deleteMutation.mutate(resumeId);
   };
 
   const handleSave = async () => {
@@ -180,7 +147,7 @@ export default function ProfilePage() {
             accept=".pdf,.docx"
             onChange={handleFileUpload}
             className="hidden"
-            disabled={uploading}
+            disabled={uploadMutation.isPending}
           />
 
           {resumes && resumes.length > 0 ? (
@@ -200,11 +167,11 @@ export default function ProfilePage() {
                     <Check className="w-5 h-5 text-success-500" />
                     <button
                       onClick={() => handleDeleteResume(resume.id)}
-                      disabled={deletingResumeId === resume.id}
+                      disabled={deleteMutation.isPending}
                       className="p-1 text-neutral-500 hover:text-red-400 transition-colors disabled:opacity-50"
                       title="Remove resume"
                     >
-                      {deletingResumeId === resume.id ? (
+                      {deleteMutation.isPending ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
                         <Trash2 className="w-4 h-4" />
@@ -217,10 +184,17 @@ export default function ProfilePage() {
                 + Upload another resume
               </label>
             </div>
-          ) : uploading ? (
+          ) : uploadMutation.isPending ? (
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="w-8 h-8 text-primary-400 animate-spin" />
               <span className="text-neutral-400">Uploading...</span>
+            </div>
+          ) : uploadMutation.isError ? (
+            <div className="flex flex-col items-center gap-3">
+              <span className="text-red-400 text-sm">Upload failed. Please try again.</span>
+              <label htmlFor="resume" className="cursor-pointer text-primary-400 hover:text-primary-300 text-sm">
+                Try again
+              </label>
             </div>
           ) : (
             <label htmlFor="resume" className="cursor-pointer">

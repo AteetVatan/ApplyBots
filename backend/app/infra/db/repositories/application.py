@@ -184,19 +184,36 @@ class SQLApplicationRepository:
 
     async def count_today(self, *, user_id: str) -> int:
         """Count applications submitted today by user."""
-        today_start = datetime.combine(date.today(), datetime.min.time())
-        stmt = (
-            select(func.count())
-            .select_from(ApplicationModel)
-            .where(
-                and_(
-                    ApplicationModel.user_id == user_id,
-                    ApplicationModel.submitted_at >= today_start,
-                )
+        today = date.today()
+        stmt = select(func.count()).select_from(ApplicationModel).where(
+            and_(
+                ApplicationModel.user_id == user_id,
+                func.date(ApplicationModel.created_at) == today,
             )
         )
         result = await self._session.execute(stmt)
-        return result.scalar_one()
+        return result.scalar() or 0
+
+    async def get_by_user_id_since(
+        self,
+        user_id: str,
+        since: datetime,
+    ) -> list[Application]:
+        """Get applications for a user since a given datetime."""
+        stmt = (
+            select(ApplicationModel)
+            .where(
+                and_(
+                    ApplicationModel.user_id == user_id,
+                    ApplicationModel.created_at >= since,
+                )
+            )
+            .options(selectinload(ApplicationModel.notes))
+            .order_by(ApplicationModel.created_at.desc())
+        )
+        result = await self._session.execute(stmt)
+        models = result.scalars().all()
+        return [self._to_domain(m) for m in models]
 
     def _to_domain(self, model: ApplicationModel) -> Application:
         """Convert ORM model to domain entity."""

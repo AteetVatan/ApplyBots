@@ -51,24 +51,29 @@ async function proxyRequest(
     body = await request.text();
   }
 
-  console.log(`[Proxy] Forwarding to: ${url.toString()}`);
-  console.log(`[Proxy] Headers being sent:`, JSON.stringify(headers));
-
-  try {
-    const response = await fetch(url.toString(), {
-      method: request.method,
-      headers,
-      body,
-      cache: "no-store",
-    });
-
-    // Forward the response
-    const responseData = await response.text();
-    
-    console.log(`[Proxy] Backend response: ${response.status} ${response.statusText}`);
-    if (response.status >= 400) {
-      console.log(`[Proxy] Error response body: ${responseData}`);
+    console.log(`[Proxy] Forwarding to: ${url.toString()}`);
+    console.log(`[Proxy] Headers being sent:`, JSON.stringify(headers));
+    if (body) {
+      console.log(`[Proxy] Request body: ${body.substring(0, 200)}${body.length > 200 ? '...' : ''}`);
     }
+
+    try {
+      const response = await fetch(url.toString(), {
+        method: request.method,
+        headers,
+        body,
+        cache: "no-store",
+      });
+
+      // Forward the response
+      const responseData = await response.text();
+      const contentType = response.headers.get("Content-Type") || "";
+      
+      console.log(`[Proxy] Backend response: ${response.status} ${response.statusText}`);
+      if (response.status >= 400) {
+        console.error(`[Proxy] Error response body: ${responseData}`);
+        console.error(`[Proxy] Content-Type: ${contentType}`);
+      }
     
     // Handle 204 No Content - cannot have a body
     if (response.status === 204) {
@@ -78,11 +83,46 @@ async function proxyRequest(
       });
     }
     
+    // Normalize error responses to JSON format
+    if (response.status >= 400) {
+      let errorJson: { detail: string };
+      
+      if (contentType.includes("application/json")) {
+        try {
+          errorJson = JSON.parse(responseData);
+        } catch {
+          // Invalid JSON, wrap it
+          errorJson = { detail: responseData || "Internal server error" };
+        }
+      } else {
+        // Plain text or other format, wrap it in JSON
+        errorJson = { detail: responseData || "Internal server error" };
+      }
+      
+      return NextResponse.json(errorJson, {
+        status: response.status,
+        statusText: response.statusText,
+      });
+    }
+    
+    // For successful responses, try to parse as JSON if content-type suggests it
+    if (contentType.includes("application/json")) {
+      try {
+        const jsonData = JSON.parse(responseData);
+        return NextResponse.json(jsonData, {
+          status: response.status,
+          statusText: response.statusText,
+        });
+      } catch {
+        // If JSON parsing fails, return as text
+      }
+    }
+    
     return new NextResponse(responseData, {
       status: response.status,
       statusText: response.statusText,
       headers: {
-        "Content-Type": response.headers.get("Content-Type") || "application/json",
+        "Content-Type": contentType || "application/json",
       },
     });
   } catch (error) {

@@ -6,6 +6,7 @@ Standards: python_clean.mdc
 """
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -81,3 +82,6 @@ class ResumeResponse(BaseModel):
     is_primary: bool
     parsed_data: ParsedResumeResponse | None
     created_at: datetime
+    extraction_status: Literal["success", "partial", "failed", "pending_ocr"] | None = None
+    extraction_warnings: list[str] | None = None
+    extraction_method: str | None = None

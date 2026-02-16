@@ -99,8 +99,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Login failed");
+      let errorMessage = "Login failed";
+      try {
+        const error = await response.json();
+        const detail = error.detail;
+        if (typeof detail === "string") {
+          errorMessage = detail;
+        } else if (detail) {
+          errorMessage = JSON.stringify(detail);
+        }
+      } catch {
+        try {
+          const errorText = await response.text();
+          errorMessage = errorText || errorMessage;
+        } catch {
+          // Fallback to default message
+        }
+      }
+      throw new Error(errorMessage);
     }
 
     const data = await response.json();
@@ -117,8 +133,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Signup failed");
+      let errorMessage = "Signup failed";
+      try {
+        const error = await response.json();
+        const detail = error.detail;
+        if (typeof detail === "string") {
+          errorMessage = detail;
+        } else if (detail) {
+          errorMessage = JSON.stringify(detail);
+        }
+      } catch {
+        try {
+          const errorText = await response.text();
+          errorMessage = errorText || errorMessage;
+        } catch {
+          // Fallback to default message
+        }
+      }
+      throw new Error(errorMessage);
     }
 
     const data = await response.json();

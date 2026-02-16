@@ -8,20 +8,21 @@ This guide provides detailed instructions for setting up, installing, and debugg
 
 1. [Prerequisites](#prerequisites)
 2. [Quick Start with Docker](#quick-start-with-docker)
-3. [Infrastructure Setup](#infrastructure-setup)
-4. [Backend Setup](#backend-setup)
-5. [Frontend Setup](#frontend-setup)
-6. [Reactive Resume Setup](#reactive-resume-setup)
-7. [OAuth Setup](#oauth-setup-optional)
-8. [Environment Configuration](#environment-configuration)
-9. [Running the Application](#running-the-application)
-10. [Debugging](#debugging)
-11. [Common Issues & Solutions](#common-issues--solutions)
-12. [Testing](#testing)
-13. [Code Quality](#code-quality)
-14. [API Endpoints Reference](#api-endpoints-reference)
-15. [Features Overview](#features-overview)
-16. [Next Steps](#next-steps)
+3. [Local Development Setup (For Debugging)](#local-development-setup-for-debugging)
+4. [Infrastructure Setup](#infrastructure-setup)
+5. [Backend Setup](#backend-setup)
+6. [Frontend Setup](#frontend-setup)
+7. [Reactive Resume Setup](#reactive-resume-setup)
+8. [OAuth Setup](#oauth-setup-optional)
+9. [Environment Configuration](#environment-configuration)
+10. [Running the Application](#running-the-application)
+11. [Debugging](#debugging)
+12. [Common Issues & Solutions](#common-issues--solutions)
+13. [Testing](#testing)
+14. [Code Quality](#code-quality)
+15. [API Endpoints Reference](#api-endpoints-reference)
+16. [Features Overview](#features-overview)
+17. [Next Steps](#next-steps)
 
 ---
 
@@ -71,6 +72,13 @@ pnpm --version
 
 ## Quick Start with Docker
 
+**Use this approach when you want to:**
+- Get everything running quickly
+- Test the full application stack
+- Deploy to production-like environment
+
+**For debugging frontend/Reactive Resume locally, use [Local Development Setup](#local-development-setup-for-debugging) instead.**
+
 The fastest way to get everything running:
 
 ```bash
@@ -106,9 +114,75 @@ python scripts/seed_jobs.py
 
 ---
 
+## Local Development Setup (For Debugging)
+
+**Use this approach when you want to:**
+- Debug frontend code with hot reload and breakpoints
+- Debug Reactive Resume with full IDE support
+- Debug backend code locally
+- Have full control over your development environment
+
+**This approach runs:**
+- ✅ Infrastructure services in Docker (PostgreSQL, Redis, MinIO, Browserless, ChromaDB)
+- ✅ Application code locally (Backend, Frontend, Reactive Resume)
+
+**Setup Steps:**
+
+1. **Start Infrastructure Services** (see [Infrastructure Setup](#infrastructure-setup) below)
+   - PostgreSQL, Redis, MinIO, Browserless, ChromaDB
+
+2. **Setup Backend Locally** (see [Backend Setup - Option B](#backend-setup))
+   - Install Python dependencies
+   - Configure environment
+   - Run migrations
+   - Start backend server locally
+
+3. **Setup Frontend Locally** (see [Frontend Setup - Option B](#frontend-setup))
+   - Install Node.js dependencies
+   - Configure environment
+   - Start frontend dev server
+
+4. **Setup Reactive Resume Locally** (see [Reactive Resume Setup - Option B](#reactive-resume-setup))
+   - Install pnpm dependencies
+   - Configure environment
+   - Start Reactive Resume dev server
+
+**Quick Start for Local Development:**
+
+```bash
+# 1. Start all infrastructure services
+# (Follow Infrastructure Setup section below)
+
+# 2. Setup and start backend
+cd backend
+python -m venv venv
+source venv/bin/activate  # or .\venv\Scripts\activate on Windows
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env with your settings
+alembic upgrade head
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
+
+# 3. Setup and start frontend (in new terminal)
+cd frontend
+npm install
+# Create .env.local with NEXT_PUBLIC_API_URL=http://localhost:8080
+npm run dev
+
+# 4. Setup and start Reactive Resume (in new terminal)
+cd reactive-resume
+pnpm install
+# Create .env with APP_URL=http://localhost:3002 and PRINTER_ENDPOINT=ws://localhost:4000?token=1234567890
+pnpm run dev
+```
+
+---
+
 ## Infrastructure Setup
 
-Before setting up the backend and frontend, you need to start the infrastructure services they depend on. These services should be started first.
+**For Local Development:** Before setting up the backend and frontend locally, you need to start the infrastructure services they depend on. These services should be started first.
+
+> **Note:** If you're using `make dev` (Quick Start with Docker), infrastructure services are started automatically. Skip this section and go directly to [Backend Setup](#backend-setup) or [Frontend Setup](#frontend-setup).
 
 ### 1. Start PostgreSQL (Required for Backend)
 
@@ -265,9 +339,10 @@ docker ps | grep minio
 # Or on Windows PowerShell:
 docker ps | Select-String minio
 
-# Test API endpoint
-curl http://localhost:9000/minio/health/live
-# Should return: healthy
+# Test API endpoint (health check)
+curl -I http://localhost:9000/minio/health/live
+# Should return: HTTP/1.1 200 OK (empty body indicates healthy)
+# Note: The endpoint returns HTTP 200 with empty body, not the text "healthy"
 ```
 
 ### 4. Start Browserless (Required for Reactive Resume PDF Generation)
@@ -332,6 +407,73 @@ docker ps | Select-String browserless
 curl http://localhost:4000
 ```
 
+### 5. Start ChromaDB (Required for Vector Search)
+
+ChromaDB is used for semantic search and similarity matching (resume-job matching, learning from user feedback).
+
+**Option A: Standalone Container**
+
+```bash
+# Start ChromaDB container
+docker run -d --name ApplyBots-chroma \
+  -p 8000:8000 \
+  -v chroma_data:/chroma/chroma \
+  chromadb/chroma:latest
+
+# PowerShell (Windows):
+docker run -d --name ApplyBots-chroma `
+  -p 8000:8000 `
+  -v chroma_data:/chroma/chroma `
+  chromadb/chroma:latest
+
+# Single-line version (works in both bash and PowerShell):
+docker run -d --name ApplyBots-chroma -p 8000:8000 -v chroma_data:/chroma/chroma chromadb/chroma:latest
+```
+
+**Option B: Docker Compose (All Services)**
+
+```bash
+# Start all services including ChromaDB
+make dev-up
+# or
+docker compose -f docker/docker-compose.yml up -d chromadb
+```
+
+**Managing ChromaDB Container:**
+
+```bash
+# Start ChromaDB (if stopped)
+docker start ApplyBots-chroma
+
+# Stop ChromaDB
+docker stop ApplyBots-chroma
+
+# Remove ChromaDB container (if needed)
+docker rm ApplyBots-chroma
+
+# View ChromaDB logs
+docker logs ApplyBots-chroma
+```
+
+**Verify ChromaDB is Running:**
+
+```bash
+# Check container is running
+docker ps | grep chroma
+# Or on Windows PowerShell:
+docker ps | Select-String chroma
+
+# Test API endpoint (health check)
+curl http://localhost:8000/api/v2/heartbeat
+# Should return: {"nanosecond heartbeat": <timestamp>}
+# Note: ChromaDB v1 API is deprecated, use v2 endpoint
+```
+
+**Note:** ChromaDB is optional for basic functionality but required for:
+- Semantic job-resume matching
+- Learning from user feedback
+- Answer learning features
+
 ---
 
 ## Backend Setup
@@ -355,7 +497,7 @@ cd backend
 
 # Windows
 python -m venv venv
-.\venv\Scripts\activate
+.\.venv\Scripts\activate
 
 # macOS/Linux
 python -m venv venv
@@ -372,16 +514,69 @@ playwright install chromium
 playwright install-deps
 ```
 
-#### 2b. Install Tesseract OCR (Optional but Recommended)
+> **Note:** The PDF extraction pipeline uses:
+> - **pypdfium2** - Primary PDF text extraction (installed via pip)
+> - **Tesseract OCR** - OCR engine for scanned PDFs (install separately, see section 2b)
+> - **Ghostscript** - Required for OCRmyPDF to work (install separately, see section 2b)
+> - **qpdf** - Optional PDF repair tool (install separately, see section 2b)
+> 
+> **Poppler is no longer required** - the new pipeline uses pypdfium2 for native PDF rendering.
 
-Tesseract OCR enables text extraction from scanned/image-based PDF resumes. Without it, only text-based PDFs can be processed.
+#### 2b. Install System Dependencies for PDF Extraction (Optional but Recommended)
+
+The PDF extraction pipeline uses the following system tools:
+
+**Required:**
+- **pypdfium2** - Installed via pip (in requirements.txt)
+- **Tesseract OCR** - For OCR on scanned/image-based PDFs (install separately, see below)
+- **Ghostscript** - Required for OCRmyPDF to work (install separately, see below)
+
+**Optional (for enhanced functionality):**
+- **qpdf** - For PDF repair (optional, best-effort)
+
+**Install qpdf (Optional - for PDF repair):**
+
+**Windows:**
+```powershell
+# Using Chocolatey
+choco install qpdf
+
+# Using Scoop
+scoop install qpdf
+
+# Verify installation
+qpdf --version
+```
+
+**macOS:**
+```bash
+# Using Homebrew
+brew install qpdf
+
+# Verify installation
+qpdf --version
+```
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt-get update
+sudo apt-get install -y qpdf
+
+# Verify installation
+qpdf --version
+```
+
+**Install Tesseract OCR (Recommended - for OCR on scanned PDFs):**
 
 **Windows:**
 ```powershell
 # Option 1: Using Chocolatey (recommended)
 choco install tesseract
 
-# Option 2: Download installer from GitHub
+# Option 2: Using Scoop
+scoop install tesseract
+
+# Option 3: Download installer from GitHub
 # https://github.com/UB-Mannheim/tesseract/wiki
 # After installing, add to PATH:
 # C:\Program Files\Tesseract-OCR
@@ -408,56 +603,42 @@ sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
 tesseract --version
 ```
 
-> **Note:** When using Docker, Tesseract is automatically installed in the container. This step is only needed for local development.
-
-#### 2c. Install Poppler (Required for PDF Image Extraction)
-
-Poppler is required by `pdf2image` to convert PDF pages to images for OCR and AI Vision extraction. Without it, the OCR and Vision AI fallbacks won't work.
+**Install Ghostscript (Required for OCRmyPDF):**
 
 **Windows:**
 ```powershell
 # Option 1: Using Chocolatey (recommended)
-choco install poppler
-```
+choco install ghostscript
 
-**Option 2: Manual Installation (Windows)**
+# Option 2: Using Scoop
+scoop install ghostscript
 
-1. **Download** from: https://github.com/osser/poppler-windows/releases
-2. **Extract** to: `C:\Program Files\poppler`
-3. **Add to system PATH:**
-   - Press `Win + R` → type `sysdm.cpl` → Enter
-   - Click **Advanced** tab → **Environment Variables**
-   - Under **System variables**, find and select **Path** → **Edit**
-   - Click **New** → add `C:\Program Files\poppler\Library\bin`
-   - Click **OK** on all dialogs
-4. **Restart your terminal/IDE** (important!)
-
-```powershell
-# Verify installation (after restart)
-pdfinfo -v
-# or
-pdftoppm -v
+# Verify installation
+gs --version
 ```
 
 **macOS:**
 ```bash
 # Using Homebrew
-brew install poppler
+brew install ghostscript
 
 # Verify installation
-pdfinfo -v
+gs --version
 ```
 
 **Linux (Debian/Ubuntu):**
 ```bash
 sudo apt-get update
-sudo apt-get install -y poppler-utils
+sudo apt-get install -y ghostscript
 
 # Verify installation
-pdfinfo -v
+gs --version
 ```
 
-> **Note:** After installing Poppler on Windows, you must restart your terminal/IDE for the PATH changes to take effect.
+> **Note:** 
+> - OCRmyPDF requires both Tesseract and Ghostscript to work properly.
+> - When using Docker, Tesseract, Ghostscript, and qpdf are automatically installed in the container. This step is only needed for local development.
+> - **Poppler is no longer required** - the new pipeline uses pypdfium2 for native PDF rendering.
 
 #### 3. Configure Environment
 
@@ -513,14 +694,28 @@ RATE_LIMIT_WINDOW_SECONDS=60
 > **Note:** Ensure PostgreSQL is already running (see [Infrastructure Setup](#infrastructure-setup) section above).
 
 ```bash
-# Run migrations (REQUIRED before seeding)
+# Navigate to backend directory
 cd backend
 
-# Apply migrations to create database tables
-alembic upgrade head
+# Activate virtual environment (if not already active)
+# On Windows:
+.venv\Scripts\Activate.ps1
+# On Linux/Mac:
+source .venv/bin/activate
 
-# Create initial migration (only needed once, if migrations/versions is empty)
-alembic revision --autogenerate -m "Initial migration"
+# Apply migrations to create database tables
+python -m alembic upgrade head
+
+# If you encounter "Multiple head revisions" error:
+# 1. Check current heads:
+python -m alembic heads
+# 2. Create a merge migration (replace with actual head revisions):
+python -m alembic merge -m "merge_heads" <revision1> <revision2>
+# 3. Then run upgrade again:
+python -m alembic upgrade head
+
+# Verify current migration state
+python -m alembic current
 
 cd ..
 
@@ -582,6 +777,10 @@ docker exec ApplyBots-redis redis-cli ping
 # PostgreSQL health check
 docker exec ApplyBots-postgres pg_isready -U postgres
 # Should return: accepting connections
+
+# ChromaDB health check
+curl http://localhost:8000/api/v1/heartbeat
+# Should return: {"nanosecond heartbeat": <timestamp>}
 ```
 
 ### Service Ports Summary
@@ -1027,6 +1226,7 @@ make dev-rebuild
 | Redis | `docker start ApplyBots-redis` | 6379 |
 | MinIO | `docker start ApplyBots-minio` | 9000, 9001 |
 | Browserless | `docker start ApplyBots-browserless` | 4000 |
+| ChromaDB | `docker start ApplyBots-chroma` | 8000 |
 
 ### All Available Makefile Commands
 
@@ -1443,11 +1643,11 @@ S3_BUCKET=applybots  # lowercase only!
 PDF appears to be scanned/image-based but OCR is unavailable.
 ```
 
-**Cause:** The uploaded PDF is a scanned document (images instead of text) and Tesseract OCR is not installed.
+**Cause:** The uploaded PDF is a scanned document (images instead of text) and OCR tools are not available.
 
 **Solution:**
 
-1. **For Docker users:** Rebuild the backend container (Tesseract is now included):
+1. **For Docker users:** Rebuild the backend container (Tesseract, Ghostscript, and qpdf are included):
    ```bash
    make dev-rebuild
    # or
@@ -1455,101 +1655,117 @@ PDF appears to be scanned/image-based but OCR is unavailable.
    docker compose -f docker/docker-compose.yml up -d
    ```
 
-2. **For local development:** Install Tesseract OCR:
+2. **For local development:** Install OCR dependencies:
    ```bash
+   # Install Python packages (required)
+   pip install pypdfium2
+   
+   # Install Tesseract OCR (required for OCRmyPDF)
    # Windows (Chocolatey)
    choco install tesseract
+   
+   # Windows (Scoop)
+   scoop install tesseract
    
    # macOS
    brew install tesseract
    
    # Linux
    sudo apt-get install tesseract-ocr tesseract-ocr-eng
+   
+   # Install Ghostscript (required for OCRmyPDF)
+   # Windows (Chocolatey)
+   choco install ghostscript
+   
+   # Windows (Scoop)
+   scoop install ghostscript
+   
+   # macOS
+   brew install ghostscript
+   
+   # Linux
+   sudo apt-get install ghostscript
    ```
 
 3. **Alternative:** Upload a text-based PDF or DOCX file instead.
 
-**Verify Tesseract is working:**
+**Verify dependencies are working:**
 ```bash
+# Check Python packages
+python -c "import pypdfium2; print('pypdfium2: OK')"
+
+# Check Tesseract
 tesseract --version
 # Should output version info like: tesseract 5.x.x
+
+# Check Ghostscript
+gs --version
+# Should output version info like: GPL Ghostscript 10.x.x
 ```
 
-#### 9. PDF Extraction: "Unable to get page count. Is poppler installed?"
+#### 9. PDF Extraction: "pypdfium2 not installed - text extraction unavailable"
 
 ```
-ocr_extraction_failed          error=Unable to get page count. Is poppler installed and in PATH?
-vision_ocr_extraction_failed   error=Unable to get page count. Is poppler installed and in PATH?
+extraction_stage_failed   stage=pypdfium2_import   error_type=ImportError
 ```
 
-**Cause:** Poppler is not installed. The `pdf2image` library requires Poppler to convert PDFs to images for OCR and AI Vision extraction.
+**Cause:** The `pypdfium2` package is not installed. This is the primary PDF extraction library.
 
 **Solution:**
 
-1. **Install Poppler:**
+1. **Install pypdfium2:**
    ```bash
-   # Windows (Chocolatey)
-   choco install poppler
+   cd backend
+   pip install pypdfium2>=4.0.0
    
-   # macOS
-   brew install poppler
-   
-   # Linux
-   sudo apt-get install poppler-utils
+   # Or reinstall all dependencies
+   pip install -r requirements.txt
    ```
-   
-   **Windows Manual Installation:**
-   - Download from: https://github.com/osser/poppler-windows/releases
-   - Extract to: `C:\Program Files\poppler`
-   - Add to PATH: `C:\Program Files\poppler\Library\bin`
-     - Press `Win + R` → type `sysdm.cpl` → Enter
-     - Click **Advanced** tab → **Environment Variables**
-     - Under **System variables**, find **Path** → **Edit**
-     - Click **New** → add `C:\Program Files\poppler\Library\bin`
-     - Click **OK** on all dialogs
 
-2. **Restart your terminal/IDE** after installation for PATH changes to take effect (important!).
-
-3. **Verify installation:**
+2. **Verify installation:**
    ```bash
-   pdfinfo -v
-   # or
-   pdftoppm -v
+   python -c "import pypdfium2; print('pypdfium2:', pypdfium2.__version__)"
    ```
 
 #### 10. PDF Extraction: "No /Root object! - Is this really a PDF?"
 
 ```
-pypdf_extraction_failed        error='/Root'
-pdfplumber_extraction_failed   error=No /Root object! - Is this really a PDF?
-pdfminer_extraction_failed     error=No /Root object! - Is this really a PDF?
+pdf_validation_failed   reason=missing_root   error=PDF is missing /Root object
 ```
 
-**Cause:** The PDF file is corrupted or malformed. All PDF parsing libraries require a valid PDF structure with a `/Root` object.
+**Cause:** The PDF file is corrupted or malformed. The PDF structure validation requires a valid `/Root` object.
 
 **Solutions:**
 
-1. **Re-export the PDF** from the original source:
+1. **Try PDF repair (if qpdf is installed):**
+   - The system will automatically attempt to repair corrupted PDFs using qpdf
+   - If qpdf is not installed, install it:
+     ```bash
+     # Windows (Chocolatey)
+     choco install qpdf
+     
+     # macOS
+     brew install qpdf
+     
+     # Linux
+     sudo apt-get install qpdf
+     ```
+
+2. **Re-export the PDF** from the original source:
    - If created in Word: File → Save As → PDF
    - If created in Google Docs: File → Download → PDF Document
    - If created in Canva/other tools: Re-export as PDF
 
-2. **Use a PDF repair tool:**
+3. **Use a PDF repair tool:**
    - Adobe Acrobat: File → Save As Other → Optimized PDF
    - Online tools: [iLovePDF](https://www.ilovepdf.com/repair-pdf), [PDF2Go](https://www.pdf2go.com/repair-pdf)
    - Ghostscript: `gs -o repaired.pdf -sDEVICE=pdfwrite -dPDFSETTINGS=/prepress corrupted.pdf`
 
-3. **Create a clean copy via browser:**
+4. **Create a clean copy via browser:**
    - Open the PDF in Chrome or Edge
    - Press Ctrl+P (or Cmd+P on Mac)
    - Select "Save as PDF" as the destination
    - Save the new PDF and upload it
-
-4. **Try PyMuPDF (AGPL license)** - More tolerant of malformed PDFs:
-   ```bash
-   pip install pymupdf
-   ```
-   > **Note:** PyMuPDF uses AGPL-3.0 license which requires open-sourcing derivative works. Only use if you're okay with AGPL or for testing purposes.
 
 5. **Upload as DOCX instead** - If you have the original Word document, upload that instead of PDF.
 
@@ -1558,6 +1774,8 @@ pdfminer_extraction_failed     error=No /Root object! - Is this really a PDF?
 - File was corrupted during download or transfer
 - PDF uses unusual encoding or non-compliant structure
 - Some resume builders create non-standard PDFs
+
+**Note:** The new pipeline uses pypdfium2 (PDFium) which is more robust than the previous libraries. PDF repair via qpdf is attempted automatically before extraction.
 
 ### Frontend Issues
 
@@ -1925,6 +2143,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 # ApplyBots-redis         Up ...   0.0.0.0:6379->6379/tcp
 # ApplyBots-minio         Up ...   0.0.0.0:9000-9001->9000-9001/tcp
 # ApplyBots-browserless   Up ...   0.0.0.0:4000->3000/tcp
+# ApplyBots-chroma        Up ...   0.0.0.0:8000->8000/tcp
 ```
 
 Happy coding! 🚀

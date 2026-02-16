@@ -51,8 +51,8 @@ module = [
     "aioboto3.*",
     "stripe.*",
     "docx.*",
-    "pdfplumber.*",
-    "pdf2image.*",
+    "pypdfium2.*",
+
     "pytesseract.*",
     "PIL.*",
 ]

@@ -1,10 +1,7 @@
 ---
-description: "Python clean-code"
-globs: ["**/*.py"]
-alwaysApply: true
-priority: 10
+trigger: glob
+globs: **/*.py, *.py
 ---
--
 
 - Arch: Clean/Hex; core=logic; infra=IO.
 - Std: PEP8+Google; ruff fmt+lint; small diffs; no new deps/APIs unless required.

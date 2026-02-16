@@ -12,27 +12,10 @@ from typing import AsyncIterator
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.config import (
-    LLM_CONFIG_APPLY,
-    LLM_CONFIG_CRITIC,
-    LLM_CONFIG_MATCHER,
-    LLM_CONFIG_ORCHESTRATOR,
-    LLM_CONFIG_QC,
-    LLM_CONFIG_RESUME,
-    LLM_CONFIG_SCRAPER,
-)
-from app.agents.prompts import (
-    APPLY_AGENT_PROMPT,
-    CRITIC_AGENT_PROMPT,
-    JOB_SCRAPER_PROMPT,
-    MATCH_AGENT_PROMPT,
-    ORCHESTRATOR_SYSTEM_PROMPT,
-    QC_AGENT_PROMPT,
-    RESUME_AGENT_PROMPT,
-)
 from app.config import Settings
 
 logger = structlog.get_logger()
+
 
 
 @dataclass
@@ -84,22 +67,36 @@ class JobApplicationWorkflow:
         self._agents: dict = {}
 
     def _setup_agents(self) -> None:
-        """Initialize AutoGen agents and GroupChat.
-
-        Sets up the multi-agent system with:
-        - Orchestrator: Coordinates all agents
-        - ResumeAgent: Parses and optimizes resumes
-        - JobScraperAgent: Finds and filters jobs
-        - MatchAgent: Scores job-candidate fit
-        - ApplyAgent: Generates applications
-        - QCAgent: Reviews outputs
-        - CriticAgent: Provides feedback
-        """
+        """Initialize AutoGen agents and GroupChat."""
         try:
             from autogen import AssistantAgent, GroupChat, GroupChatManager, UserProxyAgent
         except ImportError:
             logger.warning("autogen_not_installed", fallback="using_simple_workflow")
             return
+
+        try:
+            from app.agents.config import (
+                LLM_CONFIG_APPLY,
+                LLM_CONFIG_CRITIC,
+                LLM_CONFIG_MATCHER,
+                LLM_CONFIG_ORCHESTRATOR,
+                LLM_CONFIG_QC,
+                LLM_CONFIG_RESUME,
+                LLM_CONFIG_SCRAPER,
+            )
+            from app.agents.prompts import (
+                APPLY_AGENT_PROMPT,
+                CRITIC_AGENT_PROMPT,
+                JOB_SCRAPER_PROMPT,
+                MATCH_AGENT_PROMPT,
+                ORCHESTRATOR_SYSTEM_PROMPT,
+                QC_AGENT_PROMPT,
+                RESUME_AGENT_PROMPT,
+            )
+        except Exception as e:
+            logger.warning("agent_config_unavailable", error=str(e), fallback="using_simple_workflow")
+            return
+
 
         # Create UserProxy for human-in-the-loop
         self._agents["user_proxy"] = UserProxyAgent(
@@ -219,27 +216,22 @@ class JobApplicationWorkflow:
         if not self._agents:
             self._setup_agents()
 
-        try:
-            # If AutoGen is available and agents are set up, use GroupChat
-            if self._manager and "user_proxy" in self._agents:
+        # If AutoGen is available, try it first with fallback
+        if self._manager and "user_proxy" in self._agents:
+            try:
                 return await self._process_with_autogen(message)
+            except Exception as e:
+                logger.warning(
+                    "autogen_chat_failed",
+                    error=str(e),
+                    user_id=self._user_id,
+                    fallback="simple_workflow",
+                )
 
-            # Fallback to simple workflow
-            return await self._process_simple(message)
+        # Fallback to simple keyword-based workflow
+        return await self._process_simple(message)
 
-        except Exception as e:
-            logger.error(
-                "workflow_error",
-                error=str(e),
-                user_id=self._user_id,
-                exc_info=True,
-            )
-            return AgentResponse(
-                content="I encountered an error processing your request. Please try again.",
-                session_id=self._session_id,
-                agents_involved=["Orchestrator"],
-                actions_taken=["error_handling"],
-            )
+
 
     async def _process_with_autogen(self, message: str) -> AgentResponse:
         """Process message using AutoGen GroupChat.

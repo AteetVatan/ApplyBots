@@ -143,6 +143,52 @@ class QCRejectionError(ApplicationError):
         super().__init__(f"QC rejected: {reason}", code="QC_REJECTED")
 
 
+# Extraction Errors
+class ExtractionError(ApplicationError):
+    """Base exception for PDF extraction errors."""
+
+    pass
+
+
+class PDFCorruptedError(ExtractionError):
+    """PDF file is corrupted or malformed."""
+
+    def __init__(self, details: str | None = None) -> None:
+        message = "PDF structure is invalid or corrupted"
+        if details:
+            message += f": {details}"
+        super().__init__(message, code="PDF_CORRUPTED")
+        self.details = details
+
+
+class ExtractionFailedError(ExtractionError):
+    """Text extraction failed completely from PDF."""
+
+    def __init__(
+        self,
+        methods_attempted: list[str] | None = None,
+        dependency_status: dict[str, bool] | None = None,
+        guidance: list[str] | None = None,
+    ) -> None:
+        message = "Failed to extract text from PDF using any available method"
+        super().__init__(message, code="EXTRACTION_FAILED")
+        self.methods_attempted = methods_attempted or []
+        self.dependency_status = dependency_status or {}
+        self.guidance = guidance or []
+
+
+class DependencyMissingError(ApplicationError):
+    """Required dependency for extraction is missing."""
+
+    def __init__(self, dependency: str, installation_guide: str | None = None) -> None:
+        message = f"Required dependency '{dependency}' is not installed or not in PATH"
+        if installation_guide:
+            message += f". {installation_guide}"
+        super().__init__(message, code="DEPENDENCY_MISSING")
+        self.dependency = dependency
+        self.installation_guide = installation_guide
+
+
 # Automation Errors
 class AutomationError(DomainError):
     """Base automation error."""

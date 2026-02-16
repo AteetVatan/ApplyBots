@@ -25,12 +25,9 @@ celery==5.3.6
 redis==5.0.1
 
 # Document Processing
-pdfplumber>=0.10.0
-pypdf>=4.0.0  # Fast, lightweight PDF text extraction (BSD-3-Clause)
-pdfminer.six>=20221105  # Handles complex PDF layouts (MIT)
-pdf2image>=1.16.0
+pypdfium2>=4.0.0  # PDFium-based PDF text extraction and rendering (Apache 2.0, MIT-compatible)
 python-docx==1.1.0
-pytesseract>=0.3.10  # Optional: enables OCR for scanned PDFs (requires Tesseract installed)
+ocrmypdf>=16.0.0  # OCR engine for scanned PDFs (uses Tesseract under the hood, better than raw pytesseract)
 Pillow>=10.0.0  # Required for OCR image processing
 
 # PDF Generation

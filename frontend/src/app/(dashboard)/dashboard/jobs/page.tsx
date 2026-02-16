@@ -14,6 +14,7 @@ export default function JobsPage() {
   const createApplication = useCreateApplication();
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [applyingJobId, setApplyingJobId] = useState<string | null>(null);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -32,9 +33,14 @@ export default function JobsPage() {
   };
 
   const handleApply = async (jobId: string) => {
-    await createApplication.mutateAsync({ jobId }).catch(() => {
+    setApplyingJobId(jobId);
+    try {
+      await createApplication.mutateAsync({ jobId });
+    } catch {
       // Error handled by TanStack Query's error state
-    });
+    } finally {
+      setApplyingJobId(null);
+    }
   };
 
   return (
@@ -92,7 +98,7 @@ export default function JobsPage() {
                     )}
                   </div>
                   <p className="text-neutral-300 mb-4">{job.company}</p>
-                  
+
                   <div className="flex flex-wrap items-center gap-4 text-sm text-neutral-400">
                     {job.location && (
                       <span className="flex items-center gap-1.5">
@@ -122,10 +128,10 @@ export default function JobsPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleApply(job.id)}
-                    disabled={createApplication.isPending}
+                    disabled={applyingJobId === job.id}
                     className="flex items-center gap-2 px-4 py-2 bg-neutral-700 hover:bg-neutral-600 rounded-xl font-medium transition-colors disabled:opacity-50"
                   >
-                    {createApplication.isPending ? (
+                    {applyingJobId === job.id ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <Plus className="w-4 h-4" />

@@ -674,4 +674,5 @@ class Resume:
     parsed_data: ParsedResume | None = None
     embedding: list[float] | None = None
     is_primary: bool = False
+    extraction_error: str | None = None  # Error message if text extraction failed
     created_at: datetime = field(default_factory=datetime.utcnow)

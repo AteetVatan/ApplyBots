@@ -45,10 +45,6 @@ class Models:
     # Embeddings
     BGE_LARGE = "BAAI/bge-large-en-v1.5"
 
-    # Vision models for document OCR
-    LLAMA_VISION_11B = "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo"
-    LLAMA_VISION_90B = "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo"
-
 
 def create_llm_config(
     *,
@@ -142,17 +138,6 @@ LLM_CONFIG_CAREER = create_llm_config(
     model=Models.LLAMA4_MAVERICK,  # ~$0.27/1M tokens - balanced
     temperature=0.5,  # Moderate creativity for recommendations
     timeout=90,
-)
-
-# =============================================================================
-# Vision OCR Configuration (for PDF fallback extraction)
-# =============================================================================
-
-# Vision OCR: Extract text from scanned/image PDFs when local methods fail
-LLM_CONFIG_VISION_OCR = create_llm_config(
-    model=Models.LLAMA_VISION_11B,  # ~$0.18/1M tokens - cheapest vision model
-    temperature=0.1,  # Very low temp for accurate text extraction
-    timeout=60,
 )
 
 # =============================================================================

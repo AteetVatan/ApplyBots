@@ -8,8 +8,11 @@ Standards: python_clean.mdc
 import structlog
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
+from typing import Any, Literal
+
 from app.api.deps import AppSettings, CurrentUser, DBSession
-from app.core.exceptions import ResourceNotFoundError
+from app.core.exceptions import ExtractionError, ExtractionFailedError, PDFCorruptedError, ResourceNotFoundError
+from pydantic import BaseModel
 from app.schemas.profile import (
     PreferencesResponse,
     PreferencesUpdate,
@@ -20,6 +23,15 @@ from app.schemas.profile import (
 
 router = APIRouter()
 logger = structlog.get_logger()
+
+
+class ExtractionErrorResponse(BaseModel):
+    """Error response for extraction failures."""
+
+    error_code: str
+    message: str
+    details: dict[str, Any] | None = None
+    guidance: list[str] = []
 
 
 @router.get("", response_model=ProfileResponse)
@@ -214,35 +226,100 @@ async def upload_resume(
         resume_repository=resume_repo,
     )
 
-    resume = await resume_service.upload_and_parse(
-        user_id=current_user.id,
-        filename=file.filename or "resume",
-        content=content,
-        content_type=file.content_type,
-    )
-
-    logger.info("resume_uploaded", user_id=current_user.id, resume_id=resume.id)
-
-    parsed_response = None
-    if resume.parsed_data:
-        from app.schemas.profile import ParsedResumeResponse
-        parsed_response = ParsedResumeResponse(
-            full_name=resume.parsed_data.full_name,
-            email=resume.parsed_data.email,
-            phone=resume.parsed_data.phone,
-            location=resume.parsed_data.location,
-            summary=resume.parsed_data.summary,
-            skills=resume.parsed_data.skills,
-            total_years_experience=resume.parsed_data.total_years_experience,
+    try:
+        resume, extraction_metadata = await resume_service.upload_and_parse(
+            user_id=current_user.id,
+            filename=file.filename or "resume",
+            content=content,
+            content_type=file.content_type,
         )
 
-    return ResumeResponse(
-        id=resume.id,
-        filename=resume.filename,
-        is_primary=resume.is_primary,
-        parsed_data=parsed_response,
-        created_at=resume.created_at,
-    )
+        logger.info("resume_uploaded", user_id=current_user.id, resume_id=resume.id)
+
+        parsed_response = None
+        if resume.parsed_data:
+            from app.schemas.profile import ParsedResumeResponse
+            parsed_response = ParsedResumeResponse(
+                full_name=resume.parsed_data.full_name,
+                email=resume.parsed_data.email,
+                phone=resume.parsed_data.phone,
+                location=resume.parsed_data.location,
+                summary=resume.parsed_data.summary,
+                skills=resume.parsed_data.skills,
+                total_years_experience=resume.parsed_data.total_years_experience,
+            )
+
+        # Compute extraction status from raw_text and extraction_error
+        from app.infra.services.resume_service import MIN_TEXT_THRESHOLD
+
+        extraction_status: Literal["success", "partial", "failed", "pending_ocr"] | None = None
+        if resume.extraction_error:
+            # Text extraction failed, but file was saved - mark as pending OCR
+            extraction_status = "pending_ocr"
+        elif resume.raw_text:
+            text_length = len(resume.raw_text.strip())
+            if text_length >= MIN_TEXT_THRESHOLD:
+                extraction_status = "success"
+            elif text_length > 0:
+                extraction_status = "partial"
+            else:
+                extraction_status = "failed"
+        else:
+            extraction_status = "failed"
+
+        # Build warnings list - include extraction_error if present
+        warnings = extraction_metadata.get("extraction_warnings") or []
+        if resume.extraction_error:
+            warnings.append(f"Text extraction failed: {resume.extraction_error}")
+
+        return ResumeResponse(
+            id=resume.id,
+            filename=resume.filename,
+            is_primary=resume.is_primary,
+            parsed_data=parsed_response,
+            created_at=resume.created_at,
+            extraction_status=extraction_status,
+            extraction_warnings=warnings if warnings else None,
+            extraction_method=extraction_metadata.get("extraction_method"),
+        )
+
+    except PDFCorruptedError as e:
+        await db.rollback()
+        error_response = ExtractionErrorResponse(
+            error_code=e.code,
+            message=e.message,
+            details={"details": e.details} if e.details else None,
+            guidance=[
+                "Try re-exporting the PDF from the original source",
+                "Use a PDF repair tool (Adobe Acrobat, iLovePDF, PDF2Go)",
+                "Open PDF in Chrome/Edge and save as PDF again",
+                "If you have the original document, upload as DOCX instead",
+            ],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_response.model_dump(),
+        )
+
+    except ExtractionError as e:
+        await db.rollback()
+        error_response = ExtractionErrorResponse(
+            error_code=e.code,
+            message=e.message,
+            guidance=["Please try again or contact support if the issue persists"],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_response.model_dump(),
+        )
+
+    except Exception as e:
+        await db.rollback()
+        logger.error("resume_upload_unexpected_error", user_id=current_user.id, error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during resume upload",
+        )
 
 
 @router.get("/resumes", response_model=list[ResumeResponse])

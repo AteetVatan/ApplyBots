@@ -46,6 +46,7 @@ class SQLResumeRepository:
             parsed_data=self._parsed_to_dict(resume.parsed_data) if resume.parsed_data else None,
             embedding=resume.embedding,
             is_primary=resume.is_primary,
+            extraction_error=resume.extraction_error,
             created_at=resume.created_at,
         )
         self._session.add(model)
@@ -62,6 +63,7 @@ class SQLResumeRepository:
             model.parsed_data = self._parsed_to_dict(resume.parsed_data) if resume.parsed_data else None
             model.embedding = resume.embedding
             model.is_primary = resume.is_primary
+            model.extraction_error = resume.extraction_error
             await self._session.flush()
             return self._to_domain(model)
         raise ValueError(f"Resume {resume.id} not found")
@@ -127,6 +129,7 @@ class SQLResumeRepository:
             parsed_data=parsed_data,
             embedding=model.embedding,
             is_primary=model.is_primary,
+            extraction_error=model.extraction_error,
             created_at=model.created_at,
         )
 
